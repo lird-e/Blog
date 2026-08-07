@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+# public/ 由 build.py 生成，交给 CI（GitHub Pages）自动构建，不提交
+public/
+

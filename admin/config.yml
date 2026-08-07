@@ -1,0 +1,32 @@
+# Decap CMS 配置
+# 文档：https://decapcms.org/docs/configuration-options/
+#
+site_url: https://lird-e.github.io/Blog
+base_url: /Blog/
+
+backend:
+  name: github
+  repo: lird-e/Blog
+  branch: main
+  app_id: "Ov23liLjiwbsB5fwdbl1"
+  # OAuth App 的回调地址必须填： https://lird-e.github.io/Blog/admin/
+
+# 发布模式：simple = 保存即直接提交并上线；editorial_workflow = 走草稿/审核流程
+publish_mode: simple
+
+# 图片等媒体文件存放位置（相对仓库根目录 / 站点访问路径）
+media_folder: "assets/uploads"
+public_folder: "/assets/uploads"
+
+collections:
+  - name: "posts"
+    label: "文章"
+    folder: "content/posts"
+    create: true
+    slug: "{{slug}}"
+    fields:
+      - { name: title,   label: "标题", widget: string }
+      - { name: date,    label: "日期", widget: date, required: false }
+      - { name: tags,    label: "标签", widget: list, required: false, summary: "标签" }
+      - { name: excerpt, label: "摘要", widget: string, required: false }
+      - { name: body,    label: "正文", widget: markdown }

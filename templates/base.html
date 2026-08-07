@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+(function(){
+  try{
+    var t = localStorage.getItem('theme');
+    if(!t){ t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){}
+})();
+</script>
+<title>{{title}} - 我的博客</title>
+<link rel="stylesheet" href="{{base}}assets/style.css">
+<link rel="stylesheet" href="{{base}}assets/pygments.css">
+<link rel="alternate" type="application/rss+xml" title="我的博客" href="{{base}}feed.xml">
+{{extra_head}}
+</head>
+<body>
+<header class="site-header">
+  <div class="container">
+    <a href="{{base}}index.html" class="logo">我的博客</a>
+    <nav>
+      <a href="{{base}}index.html">首页</a>
+      <a href="{{base}}tags.html">标签</a>
+      <a href="{{base}}search.html">搜索</a>
+      <a href="{{base}}about.html">关于</a>
+      <a id="admin-link" class="admin-only" href="/admin" style="display:none;color:#2f6f4f;font-weight:600;">写文章</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">切换主题</button>
+    </nav>
+  </div>
+</header>
+<main class="container">
+{{content}}
+</main>
+<footer class="site-footer">
+  <div class="container">© 2026 我的博客 · 由纯静态生成器构建</div>
+</footer>
+<script>
+document.getElementById('theme-toggle')?.addEventListener('click', function(){
+  var cur = document.documentElement.getAttribute('data-theme') || 'light';
+  var next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try{ localStorage.setItem('theme', next); }catch(e){}
+  // 同步 Giscus 评论区主题
+  window.postMessage({ giscus: { setConfig: { theme: next } } }, '*');
+});
+// 仅当博客在本地运行（serve.py）时显示「写文章」入口，云端部署自动隐藏
+(function(){
+  var h = location.hostname;
+  if(h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0'){
+    var a = document.getElementById('admin-link');
+    if(a){ a.style.display = 'inline'; }
+  }
+})();
+</script>
+</body>
+</html>

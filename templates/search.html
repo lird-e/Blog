@@ -1,0 +1,48 @@
+<section class="search-page">
+  <h1>搜索</h1>
+  <p class="subtitle">输入关键词，实时筛选文章标题、标签、摘要与正文。</p>
+  <input type="search" id="search-input" class="search-input" placeholder="输入关键词，例如 Python、写作…" autofocus>
+  <div id="search-results" class="search-results"></div>
+  <p id="search-empty" class="search-empty" hidden>没有找到相关文章。</p>
+</section>
+<script>
+(function(){
+  var input = document.getElementById('search-input');
+  var results = document.getElementById('search-results');
+  var empty = document.getElementById('search-empty');
+  var data = null;
+  function esc(s){ return s.replace(/[&<>]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; }); }
+  function render(q){
+    q = q.trim().toLowerCase();
+    results.innerHTML = '';
+    if(!q){ empty.hidden = true; return; }
+    var hits = data.filter(function(d){
+      return d.title.toLowerCase().indexOf(q) !== -1
+        || d.tags.join(' ').toLowerCase().indexOf(q) !== -1
+        || d.excerpt.toLowerCase().indexOf(q) !== -1
+        || d.text.toLowerCase().indexOf(q) !== -1;
+    }).sort(function(a,b){
+      var at = a.title.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+      var bt = b.title.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+      return at - bt;
+    });
+    if(hits.length === 0){ empty.hidden = false; return; }
+    empty.hidden = true;
+    hits.forEach(function(h){
+      var article = document.createElement('article');
+      article.className = 'post-card';
+      var tags = h.tags.map(function(t){ return '<span class="tag-link">' + esc(t) + '</span>'; }).join(' ');
+      article.innerHTML = '<a class="card-link" href="{{base}}' + h.url + '" aria-hidden="true" tabindex="-1"></a>'
+        + '<div class="card-date">' + esc(h.date) + '</div>'
+        + '<h2>' + esc(h.title) + '</h2>'
+        + '<p class="card-excerpt">' + esc(h.excerpt) + '</p>'
+        + '<div class="card-tags">' + tags + '</div>';
+      results.appendChild(article);
+    });
+  }
+  fetch('{{base}}search.json').then(function(r){ return r.json(); }).then(function(j){
+    data = j;
+    input.addEventListener('input', function(e){ render(e.target.value); });
+  }).catch(function(){ empty.textContent = '搜索索引加载失败。'; empty.hidden = false; });
+})();
+</script>
