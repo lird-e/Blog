@@ -284,6 +284,11 @@ if ADMIN.exists():
 (PUBLIC / "assets").mkdir(parents=True, exist_ok=True)
 (PUBLIC / "assets" / "pygments.css").write_text(
     HtmlFormatter(style="default").get_style_defs(".codehilite"), encoding="utf-8")
+# 深色模式专用高亮：get_style_defs 的选择器前缀限定在 [data-theme="dark"] 下生效，
+# 与浅色高亮共存互不干扰
+(PUBLIC / "assets" / "pygments-dark.css").write_text(
+    HtmlFormatter(style="github-dark").get_style_defs('[data-theme="dark"] .codehilite'),
+    encoding="utf-8")
 
 # 生成 RSS
 rss_items = []

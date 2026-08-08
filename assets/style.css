@@ -89,8 +89,8 @@ body{
 .search-empty{color:var(--muted);}
 .comments{margin:30px 0 10px;}
 [data-theme="dark"]{--bg:#0d1117;--text:#e6edf3;--muted:#8b949e;--accent:#3fb950;--border:#30363d;--card:#161b22;}
-[data-theme="dark"] .post-content pre{background:#161b22;}
+/* 深色模式代码块：背景与 github-dark 高亮主题容器一致，
+   语法颜色由 pygments-dark.css 提供（不要再加 !important 覆盖 token 颜色） */
+[data-theme="dark"] .post-content pre{background:#0d1117;}
 [data-theme="dark"] .post-content :not(pre)>code{background:#21262d;}
 [data-theme="dark"] .tag-count{background:#21262d;}
-[data-theme="dark"] .codehilite{background:#f6f8fa !important;color:#24292f !important;}
-[data-theme="dark"] .codehilite *{color:inherit !important;}
