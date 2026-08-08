@@ -18,7 +18,7 @@ publish_mode: simple
 # 图片等媒体文件存放位置（相对仓库根目录 / 站点访问路径）
 media_folder: "assets/uploads"
 # 站点部署在 /Blog/ 子路径下，public_folder 必须带子路径前缀，
-# 否则 Decap 插入正文的图片链接 /assets/... 会解析到域名根导致 404
+# 否则 CMS 插入正文的图片链接 /assets/... 会解析到域名根导致 404
 public_folder: "/Blog/assets/uploads"
 
 collections:
@@ -29,7 +29,9 @@ collections:
     slug: "{{slug}}"
     fields:
       - { name: title,   label: "标题", widget: string }
-      - { name: date,    label: "日期", widget: date, required: false }
+      # Sveltia 已废弃 widget: date，必须用 datetime + type: date；
+      # format 保持 YYYY-MM-DD 与现有文章 frontmatter 及 build.py 的解析一致
+      - { name: date,    label: "日期", widget: datetime, type: date, format: "YYYY-MM-DD", required: false }
       - { name: tags,    label: "标签", widget: list, required: false, summary: "标签" }
       - { name: excerpt, label: "摘要", widget: string, required: false }
       - { name: body,    label: "正文", widget: markdown }
