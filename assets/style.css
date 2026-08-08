@@ -39,10 +39,30 @@ body{
 .post-header h1{margin:0 0 8px;font-size:1.9rem;}
 .post-meta{color:var(--muted);font-size:.9rem;}
 .post-content h2,.post-content h3{margin-top:1.6em;}
-.post-content img{max-width:100%;border-radius:8px;}
-.post-content pre{padding:16px;border-radius:10px;overflow:auto;background:#f6f8fa;}
-.post-content code{font-family:"SFMono-Regular",Consolas,monospace;font-size:.9em;}
-.post-content :not(pre) > code{background:#f0f2f4;padding:2px 6px;border-radius:5px;}
+/* ===== 正文排版：阅读主体，字号与间距专门优化 ===== */
+.post-content{font-size:18px;line-height:1.85;}
+.post-content p{margin:1.1em 0;}
+.post-content h2{font-size:1.5rem;margin:2.2em 0 .8em;padding-bottom:.35em;border-bottom:1px solid var(--border);}
+.post-content h3{font-size:1.22rem;margin:1.8em 0 .6em;}
+.post-content h4{font-size:1.08rem;margin:1.6em 0 .5em;}
+.post-content a{color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
+.post-content a:hover{opacity:.85;}
+.post-content strong{font-weight:600;}
+.post-content blockquote{margin:1.4em 0;padding:.4em 1.2em;border-left:4px solid var(--accent);background:var(--card);color:var(--muted);border-radius:0 10px 10px 0;}
+.post-content blockquote p{margin:.5em 0;}
+.post-content ul,.post-content ol{margin:1.1em 0;padding-left:1.5em;}
+.post-content li{margin:.35em 0;}
+.post-content li::marker{color:var(--accent);}
+.post-content img{max-width:100%;border-radius:8px;display:block;margin:1.4em auto;}
+.post-content hr{border:none;border-top:1px solid var(--border);margin:2.6em 0;}
+.post-content pre{padding:18px 20px;border-radius:10px;overflow:auto;background:#f6f8fa;font-size:.9rem;line-height:1.6;}
+.post-content code{font-family:"SFMono-Regular",Consolas,monospace;font-size:.88em;}
+.post-content :not(pre) > code{background:#f0f2f4;padding:2px 7px;border-radius:5px;}
+.post-content table{border-collapse:collapse;width:100%;margin:1.4em 0;font-size:.94em;display:block;overflow-x:auto;}
+.post-content th,.post-content td{border:1px solid var(--border);padding:8px 14px;text-align:left;}
+.post-content th{background:var(--card);}
+/* 移动端正文略缩小，避免一行字数过少 */
+@media (max-width:640px){.post-content{font-size:17px;}}
 .post-footer{margin:40px 0;padding-top:20px;border-top:1px solid var(--border);}
 .site-footer{border-top:1px solid var(--border);padding:24px 0;color:var(--muted);font-size:.85rem;text-align:center;}
 .tag-link{color:var(--accent);text-decoration:none;margin-right:8px;}
