@@ -7,7 +7,10 @@
   <title>内容管理 · 我的博客</title>
 </head>
 <body>
-  <!-- Decap CMS 会从 CDN 加载编辑器，并通过 GitHub OAuth 登录 -->
-  <script src="https://unpkg.com/decap-cms@^3.3.3/dist/decap-cms.js"></script>
+  <!-- Sveltia CMS（Decap 官方继任者，完全兼容本仓库 config.yml）从 CDN 加载编辑器。
+       认证方式：GitHub Personal Access Token（登录页点"Sign In with Token"粘贴即可），
+       无需 OAuth 服务器——Decap 的 GitHub backend 无 PKCE 支持，其默认认证网关
+       api.netlify.com 只对 Netlify 托管站点有效，本站点无法用 Decap 登录。 -->
+  <script src="https://unpkg.com/@sveltia/cms/dist/sveltia-cms.js"></script>
 </body>
 </html>

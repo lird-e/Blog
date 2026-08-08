@@ -1,5 +1,5 @@
-# Decap CMS 配置
-# 文档：https://decapcms.org/docs/configuration-options/
+# Sveltia CMS 配置（兼容 Decap CMS 配置格式）
+# 文档：https://sveltiacms.app/en/docs
 #
 site_url: https://lird-e.github.io/Blog
 base_url: /Blog/
@@ -8,8 +8,9 @@ backend:
   name: github
   repo: lird-e/Blog
   branch: main
-  app_id: "Ov23liLjiwbsB5fwdbl1"
-  # OAuth App 的回调地址必须填： https://lird-e.github.io/Blog/admin/
+  # 认证方式：Personal Access Token（Sveltia 登录页内置"Sign In with Token"）。
+  # 注意：不要在此配置 app_id——GitHub backend 不支持 PKCE（该字段仅 GitLab 有效），
+  # 若未来要 OAuth 按钮登录，需部署 OAuth 代理并在 backend 加 base_url 指向代理地址。
 
 # 发布模式：simple = 保存即直接提交并上线；editorial_workflow = 走草稿/审核流程
 publish_mode: simple
