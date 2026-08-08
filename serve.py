@@ -9,7 +9,7 @@ import re, sys, subprocess, webbrowser, threading
 from pathlib import Path
 from datetime import date
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, parse_qs, quote
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
@@ -147,7 +147,9 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode("utf-8")
         data = parse_qs(body, keep_blank_values=True)
-        g = lambda k: unquote(data.get(k, [""])[0]).strip()
+        # 注意：parse_qs 已自动做 URL 解码，这里不能再 unquote，
+        # 否则正文中字面出现的 %xx（如 URL 编码链接）会被二次解码损坏
+        g = lambda k: data.get(k, [""])[0].strip()
         title, date_s = g("title"), g("date") or today()
         tags, excerpt, content = g("tags"), g("excerpt"), g("content")
         if not title or not content:
@@ -168,7 +170,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._admin("文章已保存，但重新生成站点失败：" + err)
             return
         self.send_response(302)
-        self.send_header("Location", f"/posts/{slug}.html")
+        # Location 头只能含 ASCII（latin-1），中文 slug 必须 URL 编码，
+        # 否则 HTTP 头编码异常导致浏览器收到空响应
+        self.send_header("Location", f"/posts/{quote(slug)}.html")
         self.end_headers()
 
 

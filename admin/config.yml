@@ -16,7 +16,9 @@ publish_mode: simple
 
 # 图片等媒体文件存放位置（相对仓库根目录 / 站点访问路径）
 media_folder: "assets/uploads"
-public_folder: "/assets/uploads"
+# 站点部署在 /Blog/ 子路径下，public_folder 必须带子路径前缀，
+# 否则 Decap 插入正文的图片链接 /assets/... 会解析到域名根导致 404
+public_folder: "/Blog/assets/uploads"
 
 collections:
   - name: "posts"

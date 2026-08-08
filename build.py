@@ -149,7 +149,7 @@ def make_card(p, base):
 
 # 加载所有文章
 posts = []
-for f in sorted(POSTS_DIR.glob("*.md"), reverse=True):
+for f in POSTS_DIR.glob("*.md"):
     meta, body = parse_frontmatter(f.read_text(encoding="utf-8"))
     tags_l = tag_list(meta.get("tags", ""))
     posts.append({
@@ -161,6 +161,10 @@ for f in sorted(POSTS_DIR.glob("*.md"), reverse=True):
         "slug": slugify(meta.get("title", f.stem)),
         "html": render_markdown(body),
     })
+
+# 按 frontmatter 发布日期降序（date 缺失/非法的排最后），
+# 不能按文件名排序：serve.py/Decap 生成的文件名可能没有日期前缀
+posts.sort(key=lambda p: (p["date"] == "", p["date"]), reverse=True)
 
 # 按标签归类
 tag_map = defaultdict(list)

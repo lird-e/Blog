@@ -1,0 +1,4 @@
+# 构建/本地服务依赖
+markdown
+pygments
+pyyaml
