@@ -2,9 +2,11 @@
 用法：.venv/Scripts/python build.py
 """
 import re, shutil, json, math, time
+import html as _html
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timezone
+from urllib.parse import urlparse, quote
 import markdown
 import yaml
 from pygments.formatters import HtmlFormatter
@@ -22,6 +24,9 @@ SITE_URL = "https://lird-e.github.io/Blog"        # RSS / 站点绝对链接用
 SITE_TITLE = "我的博客"
 SITE_DESC = "记录技术、思考与生活。"
 PAGE_SIZE = 10                                   # 每页文章数，超过自动分页
+
+# 站点部署的子路径前缀（如 /Blog），用于 404 页的站点绝对路径
+BASE_PATH = urlparse(SITE_URL).path.rstrip("/")  # "/Blog"
 
 # CSS 缓存版本：每次构建取时间戳，拼到样式链接 ?v= 参数上，
 # 绕过 GitHub Pages 的 10 分钟浏览器缓存，改样式后用户刷新即可拿到新版
@@ -52,7 +57,9 @@ def parse_frontmatter(text):
         norm = {}
         for k, v in meta.items():
             k = str(k).lower()
-            if isinstance(v, (datetime, timezone)):
+            if v is None:
+                v = ""  # YAML 空值（如 "excerpt:" 后无内容）解析为 None
+            elif isinstance(v, (datetime, timezone)):
                 v = v.isoformat()[:10]
             elif isinstance(v, list):
                 pass  # 标签列表保留，由 tag_list 处理
@@ -95,6 +102,21 @@ def tag_links(tags, base):
         f'<a class="tag-link" href="{base}tags/{slugify(t)}.html">{escape(t)}</a>'
         for t in tags
     )
+
+
+def esc_attr(s):
+    """meta/og 标签属性值转义（escape 默认不转双引号）"""
+    return escape(str(s), {'"': "&quot;", "'": "&#x27;"})
+
+
+def make_excerpt(html_text, limit=120):
+    """从渲染后的 HTML 提取纯文本摘要：去标签、反转义实体、折叠空白、截断。"""
+    text = re.sub(r"<[^>]+>", "", html_text)
+    text = _html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
 
 
 def rss_date(d):
@@ -144,9 +166,31 @@ def fill(tpl, **kw):
     return tpl
 
 
-def page(title, content, base="", css_ver=CSS_VER):
-    return fill(base_tpl, title=title, content=content, base=base,
-                extra_head="", css_ver=css_ver)
+def page(title, content, base="", css_ver=CSS_VER, description=SITE_DESC,
+         url_path="", og_type="website", noindex=False):
+    """title 传原始文本，本函数内部负责 <title> 与 og:title 两种语境的转义。
+    url_path：站内相对路径（如 'posts/xxx.html'），空字符串表示首页，
+    用于拼 canonical / og:url 绝对地址。"""
+    url = SITE_URL + ("/" + url_path if url_path else "/")
+    extra_head = (
+        f'<meta name="description" content="{esc_attr(description)}">\n'
+        f'<link rel="canonical" href="{escape(url)}">\n'
+        f'<meta property="og:title" content="{esc_attr(title)}">\n'
+        f'<meta property="og:description" content="{esc_attr(description)}">\n'
+        f'<meta property="og:url" content="{escape(url)}">\n'
+        f'<meta property="og:type" content="{og_type}">\n'
+        f'<meta property="og:site_name" content="{esc_attr(SITE_TITLE)}">\n'
+        f'<meta name="twitter:card" content="summary">\n'
+        f'<meta name="twitter:title" content="{esc_attr(title)}">\n'
+        f'<meta name="twitter:description" content="{esc_attr(description)}">'
+    )
+    if noindex:
+        extra_head += '\n<meta name="robots" content="noindex">'
+    # 注意 fill 替换顺序：title → content → base → extra_head → css_ver。
+    # extra_head 在 base 之后注入，其中不能含 {{base}} 占位符（上面已用
+    # f-string 预渲染绝对 URL），也不会被前面的替换误伤。
+    return fill(base_tpl, title=escape(title), content=content, base=base,
+                extra_head=extra_head, css_ver=css_ver)
 
 
 def make_card(p, base):
@@ -166,14 +210,17 @@ posts = []
 for f in POSTS_DIR.glob("*.md"):
     meta, body = parse_frontmatter(f.read_text(encoding="utf-8"))
     tags_l = tag_list(meta.get("tags", ""))
+    rendered_html = render_markdown(body)
+    # excerpt 留空时从正文纯文本自动截取，兜底首页卡片 / RSS / meta description
+    excerpt = str(meta.get("excerpt", "")).strip() or make_excerpt(rendered_html)
     posts.append({
         "title": meta.get("title", f.stem),
         "date": meta.get("date", ""),
         "tags": meta.get("tags", ""),
         "tags_list": tags_l,
-        "excerpt": meta.get("excerpt", ""),
+        "excerpt": excerpt,
         "slug": slugify(slug_source(meta, f)),
-        "html": render_markdown(body),
+        "html": rendered_html,
     })
 
 # slug 去重：同标题/同 slug 的文章自动加序号，避免输出 HTML 互相覆盖
@@ -234,7 +281,9 @@ for p in posts:
                 tags_html=tag_links(p["tags_list"], "../"),
                 content=p["html"], base="../", giscus=giscus_html())
     (out_posts / (p["slug"] + ".html")).write_text(
-        page(escape(p["title"]), body, base="../"), encoding="utf-8")
+        page(p["title"], body, base="../", description=p["excerpt"],
+             url_path=f"posts/{p['slug']}.html", og_type="article"),
+        encoding="utf-8")
 
 # 生成首页 + 分页页
 page_dir = PUBLIC / "page"
@@ -249,7 +298,8 @@ for idx, page_posts in enumerate(pages, start=1):
             page("首页", body, base=""), encoding="utf-8")
     else:
         (page_dir / (f"{idx}.html")).write_text(
-            page(f"第 {idx} 页", body, base="../"), encoding="utf-8")
+            page(f"第 {idx} 页", body, base="../",
+                 url_path=f"page/{idx}.html"), encoding="utf-8")
 
 # 生成标签索引页
 tag_cloud = "\n".join(
@@ -258,7 +308,8 @@ tag_cloud = "\n".join(
     for t, items in sorted(tag_map.items())
 )
 tags_index_body = fill(tags_index_tpl, tag_cloud=tag_cloud)
-(PUBLIC / "tags.html").write_text(page("标签", tags_index_body, base=""), encoding="utf-8")
+(PUBLIC / "tags.html").write_text(
+    page("标签", tags_index_body, base="", url_path="tags.html"), encoding="utf-8")
 
 # 生成每个标签页
 tags_dir = PUBLIC / "tags"
@@ -267,7 +318,8 @@ for t, items in tag_map.items():
     cards_t = "\n".join(make_card(p, "../") for p in items)
     body = fill(tag_tpl, tag=escape(t), post_cards=cards_t)
     (tags_dir / (slugify(t) + ".html")).write_text(
-        page(f"标签：{escape(t)}", body, base="../"), encoding="utf-8")
+        page(f"标签：{t}", body, base="../", description=f"标签「{t}」下的文章",
+             url_path=f"tags/{slugify(t)}.html"), encoding="utf-8")
 
 # 生成关于页
 about_src = CONTENT / "about.md"
@@ -277,11 +329,13 @@ if about_src.exists():
                       tags_html="", content=render_markdown(body), base="",
                       giscus="")
     (PUBLIC / "about.html").write_text(
-        page(escape(meta.get("title", "关于")), about_html, base=""), encoding="utf-8")
+        page(meta.get("title", "关于"), about_html, base="",
+             url_path="about.html"), encoding="utf-8")
 
 # 生成搜索页
 search_body = fill(search_tpl, base="")
-(PUBLIC / "search.html").write_text(page("搜索", search_body, base=""), encoding="utf-8")
+(PUBLIC / "search.html").write_text(
+    page("搜索", search_body, base="", url_path="search.html"), encoding="utf-8")
 
 # 生成搜索索引
 search_entries = []
@@ -342,5 +396,47 @@ rss = (
     + "\n  </channel>\n</rss>\n"
 )
 (PUBLIC / "feed.xml").write_text(rss, encoding="utf-8")
+
+# 生成 sitemap.xml（中文 slug 需百分号编码；文章带 lastmod）
+def sm_url(loc, lastmod=""):
+    loc_e = escape(quote(loc, safe=":/"))
+    lm = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
+    return f"  <url><loc>{loc_e}</loc>{lm}</url>"
+
+sm = [sm_url(SITE_URL + "/")]
+for idx in range(2, total_pages + 1):
+    sm.append(sm_url(f"{SITE_URL}/page/{idx}.html"))
+for p in posts:
+    sm.append(sm_url(f"{SITE_URL}/posts/{p['slug']}.html", p["date"]))
+sm.append(sm_url(f"{SITE_URL}/tags.html"))
+for t in tag_map:
+    sm.append(sm_url(f"{SITE_URL}/tags/{slugify(t)}.html"))
+if about_src.exists():
+    sm.append(sm_url(f"{SITE_URL}/about.html"))
+sm.append(sm_url(f"{SITE_URL}/search.html"))
+sitemap = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+           + "\n".join(sm) + "\n</urlset>\n")
+(PUBLIC / "sitemap.xml").write_text(sitemap, encoding="utf-8")
+
+# 生成 robots.txt（Sitemap 指令必须是绝对 URL）
+(PUBLIC / "robots.txt").write_text(
+    "User-agent: *\nAllow: /\n\n"
+    f"Sitemap: {SITE_URL}/sitemap.xml\n", encoding="utf-8")
+
+# 生成 404.html：GitHub Pages 对 /Blog/** 下未命中路径返回此页，
+# 但展示深度不确定（如 /Blog/a/b/c），相对路径会全部失效，
+# 故 base 传站点绝对前缀 /Blog/，让 CSS/favicon/导航链接绝对化。
+# 取舍：本地 serve.py 预览此页时样式丢失（正文仍可读），线上正常。
+not_found_body = (
+    '<div style="text-align:center;padding:60px 0;">'
+    "<h1>404</h1>"
+    "<p>页面不存在或已被移动。</p>"
+    f'<p><a href="{BASE_PATH}/index.html">← 返回首页</a></p>'
+    "</div>"
+)
+(PUBLIC / "404.html").write_text(
+    page("404 - 页面不存在", not_found_body, base=BASE_PATH + "/",
+         url_path="404.html", noindex=True), encoding="utf-8")
 
 print(f"✅ 生成完成：{len(posts)} 篇文章、{len(tag_map)} 个标签、{total_pages} 页")
