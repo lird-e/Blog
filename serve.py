@@ -40,18 +40,29 @@ def build_site():
 
 
 def list_posts_html():
-    files = sorted(CONTENT_POSTS.glob("*.md"), reverse=True)
+    files = list(CONTENT_POSTS.glob("*.md"))
     if not files:
         return '<li class="empty">还没有文章，发一篇吧。</li>'
-    out = []
+    # 与 build.py 一致：按 frontmatter 的 date 字段降序，date 缺失排最后。
+    # 不能按文件名排序：serve.py 新发的文件名是 slug.md（字母开头），
+    # 会排到 2026-xx-xx-*.md 数字前缀文件之后，新文章沉底。
+    items = []
     for f in files:
         text = f.read_text(encoding="utf-8")
         m = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
         title = f.stem
+        date = ""
         if m:
             for line in m.group(1).splitlines():
-                if line.lower().startswith("title:"):
+                low = line.lower()
+                if low.startswith("title:"):
                     title = line.split(":", 1)[1].strip()
+                elif low.startswith("date:"):
+                    date = line.split(":", 1)[1].strip()
+        items.append((date, title, f))
+    items.sort(key=lambda x: (x[0] == "", x[0]), reverse=True)
+    out = []
+    for date, title, f in items:
         slug = slugify(title)
         out.append(f'<li><a href="/posts/{slug}.html" target="_blank">{title}</a></li>')
     return "\n".join(out)

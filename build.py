@@ -166,6 +166,12 @@ def fill(tpl, **kw):
     return tpl
 
 
+# 构建前清空 public/：避免改 slug / 删文章后旧 HTML 残留成死链。
+# 模板已读入内存，后续 mkdir 会重建目录结构；CI 全新 checkout 时 public 不存在，跳过。
+if PUBLIC.exists():
+    shutil.rmtree(PUBLIC)
+
+
 def page(title, content, base="", css_ver=CSS_VER, description=SITE_DESC,
          url_path="", og_type="website", noindex=False):
     """title 传原始文本，本函数内部负责 <title> 与 og:title 两种语境的转义。
@@ -299,7 +305,7 @@ for idx, page_posts in enumerate(pages, start=1):
     else:
         (page_dir / (f"{idx}.html")).write_text(
             page(f"第 {idx} 页", body, base="../",
-                 url_path=f"page/{idx}.html"), encoding="utf-8")
+                 url_path=f"page/{idx}.html", noindex=True), encoding="utf-8")
 
 # 生成标签索引页
 tag_cloud = "\n".join(
@@ -335,7 +341,7 @@ if about_src.exists():
 # 生成搜索页
 search_body = fill(search_tpl, base="")
 (PUBLIC / "search.html").write_text(
-    page("搜索", search_body, base="", url_path="search.html"), encoding="utf-8")
+    page("搜索", search_body, base="", url_path="search.html", noindex=True), encoding="utf-8")
 
 # 生成搜索索引
 search_entries = []

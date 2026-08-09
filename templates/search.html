@@ -16,14 +16,14 @@
     q = q.trim().toLowerCase();
     results.innerHTML = '';
     if(!q){ empty.hidden = true; return; }
+    // 按空白拆成多关键词，AND 语义：文章需同时包含全部 token 才命中
+    var tokens = q.split(/\s+/).filter(Boolean);
     var hits = data.filter(function(d){
-      return d.title.toLowerCase().indexOf(q) !== -1
-        || d.tags.join(' ').toLowerCase().indexOf(q) !== -1
-        || d.excerpt.toLowerCase().indexOf(q) !== -1
-        || d.text.toLowerCase().indexOf(q) !== -1;
+      var hay = (d.title + ' ' + d.tags.join(' ') + ' ' + d.excerpt + ' ' + d.text).toLowerCase();
+      return tokens.every(function(t){ return hay.indexOf(t) !== -1; });
     }).sort(function(a,b){
-      var at = a.title.toLowerCase().indexOf(q) === 0 ? 0 : 1;
-      var bt = b.title.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+      var at = a.title.toLowerCase().indexOf(tokens[0]) === 0 ? 0 : 1;
+      var bt = b.title.toLowerCase().indexOf(tokens[0]) === 0 ? 0 : 1;
       return at - bt;
     });
     if(hits.length === 0){ empty.hidden = false; return; }
