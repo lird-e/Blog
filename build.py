@@ -1,7 +1,7 @@
 """纯静态博客生成器：把 content/ 下的 Markdown 渲染成 public/ 静态站点。
 用法：.venv/Scripts/python build.py
 """
-import re, shutil, json, math
+import re, shutil, json, math, time
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -22,6 +22,10 @@ SITE_URL = "https://lird-e.github.io/Blog"        # RSS / 站点绝对链接用
 SITE_TITLE = "我的博客"
 SITE_DESC = "记录技术、思考与生活。"
 PAGE_SIZE = 10                                   # 每页文章数，超过自动分页
+
+# CSS 缓存版本：每次构建取时间戳，拼到样式链接 ?v= 参数上，
+# 绕过 GitHub Pages 的 10 分钟浏览器缓存，改样式后用户刷新即可拿到新版
+CSS_VER = int(time.time())
 
 # Giscus 评论配置：到 https://giscus.app 获取 repo-id / category-id
 # 前置：GitHub 公开仓库 + 开启 Discussions + 安装 Giscus App
@@ -62,6 +66,15 @@ def parse_frontmatter(text):
 def slugify(title):
     s = re.sub(r"[^\w\u4e00-\u9fff]+", "-", title).strip("-").lower()
     return s or "post"
+
+
+def slug_source(meta, f):
+    """slug 取值：优先 frontmatter 显式 slug（如英文别名，保证 URL 稳定），
+    留空/缺失时回退标题（存量文章行为不变）。"""
+    raw = meta.get("slug")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return meta.get("title", f.stem)
 
 
 def render_markdown(body):
@@ -131,8 +144,9 @@ def fill(tpl, **kw):
     return tpl
 
 
-def page(title, content, base=""):
-    return fill(base_tpl, title=title, content=content, base=base, extra_head="")
+def page(title, content, base="", css_ver=CSS_VER):
+    return fill(base_tpl, title=title, content=content, base=base,
+                extra_head="", css_ver=css_ver)
 
 
 def make_card(p, base):
@@ -158,9 +172,22 @@ for f in POSTS_DIR.glob("*.md"):
         "tags": meta.get("tags", ""),
         "tags_list": tags_l,
         "excerpt": meta.get("excerpt", ""),
-        "slug": slugify(meta.get("title", f.stem)),
+        "slug": slugify(slug_source(meta, f)),
         "html": render_markdown(body),
     })
+
+# slug 去重：同标题/同 slug 的文章自动加序号，避免输出 HTML 互相覆盖
+used = set()
+for p in posts:
+    s = p["slug"]
+    if s not in used:
+        used.add(s)
+        continue
+    n = 2
+    while f"{s}-{n}" in used:
+        n += 1
+    p["slug"] = f"{s}-{n}"
+    used.add(p["slug"])
 
 # 按 frontmatter 发布日期降序（date 缺失/非法的排最后），
 # 不能按文件名排序：serve.py/Decap 生成的文件名可能没有日期前缀
@@ -203,11 +230,11 @@ def pager_html(current):
 out_posts = PUBLIC / "posts"
 out_posts.mkdir(parents=True, exist_ok=True)
 for p in posts:
-    body = fill(post_tpl, title=p["title"], date=p["date"],
+    body = fill(post_tpl, title=escape(p["title"]), date=escape(p["date"]),
                 tags_html=tag_links(p["tags_list"], "../"),
                 content=p["html"], base="../", giscus=giscus_html())
     (out_posts / (p["slug"] + ".html")).write_text(
-        page(p["title"], body, base="../"), encoding="utf-8")
+        page(escape(p["title"]), body, base="../"), encoding="utf-8")
 
 # 生成首页 + 分页页
 page_dir = PUBLIC / "page"
@@ -240,17 +267,17 @@ for t, items in tag_map.items():
     cards_t = "\n".join(make_card(p, "../") for p in items)
     body = fill(tag_tpl, tag=escape(t), post_cards=cards_t)
     (tags_dir / (slugify(t) + ".html")).write_text(
-        page(f"标签：{t}", body, base="../"), encoding="utf-8")
+        page(f"标签：{escape(t)}", body, base="../"), encoding="utf-8")
 
 # 生成关于页
 about_src = CONTENT / "about.md"
 if about_src.exists():
     meta, body = parse_frontmatter(about_src.read_text(encoding="utf-8"))
-    about_html = fill(post_tpl, title=meta.get("title", "关于"), date="",
+    about_html = fill(post_tpl, title=escape(meta.get("title", "关于")), date="",
                       tags_html="", content=render_markdown(body), base="",
                       giscus="")
     (PUBLIC / "about.html").write_text(
-        page(meta.get("title", "关于"), about_html, base=""), encoding="utf-8")
+        page(escape(meta.get("title", "关于")), about_html, base=""), encoding="utf-8")
 
 # 生成搜索页
 search_body = fill(search_tpl, base="")

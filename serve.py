@@ -90,7 +90,8 @@ ADMIN_HTML = """<!DOCTYPE html>
 <div class="wrap">
  <a class="back" href="/">← 返回博客首页</a>
  <h1>发文后台</h1>
- <p class="sub">填写下方表单，发布后会自动生成静态页面。</p>
+ <p class="sub">填写下方表单，发布后会自动生成静态页面（仅本机可访问）。</p>
+ <p class="sub">线上网页发文请访问 <a href="https://lird-e.github.io/Blog/admin/">lird-e.github.io/Blog/admin/</a>（Sveltia CMS，需 GitHub Token）；本页保存的草稿需自行 git push 才会部署上线。</p>
  <!--MSG-->
  <form method="post" action="/admin">
   <label>标题 *</label>
@@ -182,7 +183,9 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"🚀 本地博客后台已启动： http://localhost:{PORT}/admin")
     print("   普通访问 http://localhost:%d 可看博客；Ctrl+C 停止。" % PORT)
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    # 仅绑定本机回环地址：后台表单无认证，绑 0.0.0.0 会让局域网内任何人能发文章。
+    # 如需局域网访问，请自行加认证后再改回 "0.0.0.0"。
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     # 启动后自动打开浏览器跳到发文后台（仅本机有效）
     def open_browser():
         try:

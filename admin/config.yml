@@ -32,6 +32,8 @@ collections:
       preview: false
     fields:
       - { name: title,   label: "标题", widget: string }
+      # URL 别名：留空自动用标题生成 URL；填英文（如 my-post）则 URL 稳定、利于 SEO
+      - { name: slug,    label: "URL 别名（可选，英文）", widget: string, required: false }
       # Sveltia 已废弃 widget: date，必须用 datetime + type: date；
       # format 保持 YYYY-MM-DD 与现有文章 frontmatter 及 build.py 的解析一致
       - { name: date,    label: "日期", widget: datetime, type: date, format: "YYYY-MM-DD", required: false }
