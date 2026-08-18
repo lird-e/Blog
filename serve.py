@@ -6,6 +6,8 @@
 - 普通访问（如 / 、/posts/...）直接托管 public/ 静态文件。
 """
 import re, sys, subprocess, webbrowser, threading
+import html as html_mod
+import yaml
 from pathlib import Path
 from datetime import date
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -53,18 +55,21 @@ def list_posts_html():
         title = f.stem
         date = ""
         if m:
-            for line in m.group(1).splitlines():
-                low = line.lower()
-                if low.startswith("title:"):
-                    title = line.split(":", 1)[1].strip()
-                elif low.startswith("date:"):
-                    date = line.split(":", 1)[1].strip()
+            # 用 yaml 解析，兼容带引号的值（safe_dump 对含特殊字符的标题会加引号）
+            try:
+                meta = yaml.safe_load(m.group(1)) or {}
+            except yaml.YAMLError:
+                meta = {}
+            if isinstance(meta, dict):
+                title = str(meta.get("title") or f.stem)
+                d = meta.get("date")
+                date = str(d)[:10] if d is not None else ""
         items.append((date, title, f))
     items.sort(key=lambda x: (x[0] == "", x[0]), reverse=True)
     out = []
     for date, title, f in items:
         slug = slugify(title)
-        out.append(f'<li><a href="/posts/{slug}.html" target="_blank">{title}</a></li>')
+        out.append(f'<li><a href="/posts/{slug}.html" target="_blank">{html_mod.escape(title)}</a></li>')
     return "\n".join(out)
 
 
@@ -174,8 +179,13 @@ class Handler(SimpleHTTPRequestHandler):
         while candidate.exists():
             candidate = CONTENT_POSTS / (f"{slug}-{n}.md")
             n += 1
-        md = (f"---\ntitle: {title}\ndate: {date_s}\ntags: {tags}\n"
-              f"excerpt: {excerpt}\n---\n\n{content}\n")
+        # frontmatter 用 yaml.safe_dump 序列化：标题/标签里若含冒号、引号、
+        # 换行等特殊字符，直接字符串拼接会写坏 YAML，导致 build.py 解析失败、
+        # 文章静默丢失标题和日期。
+        fm = yaml.safe_dump(
+            {"title": title, "date": date_s, "tags": tags, "excerpt": excerpt},
+            allow_unicode=True, sort_keys=False).rstrip("\n")
+        md = f"---\n{fm}\n---\n\n{content}\n"
         candidate.write_text(md, encoding="utf-8")
         ok, err = build_site()
         if not ok:

@@ -3,4 +3,6 @@ __pycache__/
 *.pyc
 # public/ 由 build.py 生成，交给 CI（GitHub Pages）自动构建，不提交
 public/
-
+# 本地工具的个人数据目录，不应进入公开仓库
+.workbuddy/
+.trae/
