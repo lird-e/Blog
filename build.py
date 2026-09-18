@@ -260,10 +260,13 @@ pages = [posts[i * PAGE_SIZE:(i + 1) * PAGE_SIZE] for i in range(total_pages)]
 def pager_html(current):
     if total_pages <= 1:
         return ""
+    # 分页页生成在 /page/ 子目录下（page/2.html、page/3.html…），
+    # 链接必须回退一级目录（../），否则相对路径会解析成 /page/page/N.html 而 404
+    base = "" if current == 1 else "../"
     parts = []
     if current > 1:
         prev = "index.html" if current == 2 else f"page/{current - 1}.html"
-        parts.append(f'<a class="pager-prev" href="{prev}">← 上一页</a>')
+        parts.append(f'<a class="pager-prev" href="{base}{prev}">← 上一页</a>')
     else:
         parts.append('<span class="pager-prev disabled">← 上一页</span>')
     for n in range(1, total_pages + 1):
@@ -271,9 +274,9 @@ def pager_html(current):
         if n == current:
             parts.append(f'<span class="pager-num current">{n}</span>')
         else:
-            parts.append(f'<a class="pager-num" href="{href}">{n}</a>')
+            parts.append(f'<a class="pager-num" href="{base}{href}">{n}</a>')
     if current < total_pages:
-        parts.append(f'<a class="pager-next" href="page/{current + 1}.html">下一页 →</a>')
+        parts.append(f'<a class="pager-next" href="{base}page/{current + 1}.html">下一页 →</a>')
     else:
         parts.append('<span class="pager-next disabled">下一页 →</span>')
     return '<nav class="pager">' + "".join(parts) + '</nav>'
