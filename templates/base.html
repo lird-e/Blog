@@ -29,8 +29,11 @@
       <a href="{{base}}tags.html">标签</a>
       <a href="{{base}}search.html">搜索</a>
       <a href="{{base}}about.html">关于</a>
-      <a id="admin-link" class="admin-only" href="{{base}}admin" style="display:none;color:#2f6f4f;font-weight:600;">写文章</a>
-      <button id="theme-toggle" class="theme-toggle" type="button">切换主题</button>
+      <a id="admin-link" class="admin-only" href="{{base}}admin" style="display:none;">写文章</a>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题" title="切换主题">
+        <svg class="icon-sun" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm-6.364-2a.75.75 0 0 1-.75-.75v-.5a.75.75 0 0 1 .75-.75h1a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-.75.75h-1ZM13.364 7.75a.75.75 0 0 1-.75-.75v-.5a.75.75 0 0 1 .75-.75h1a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-.75.75h-1ZM8 1.636a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1-.75-.75v-1a.75.75 0 0 1 .75-.75h.5ZM8 12.364a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1-.75-.75v-1a.75.75 0 0 1 .75-.75h.5ZM2.343 3.404a.75.75 0 0 1 1.06 0l.707.707a.75.75 0 0 1-1.06 1.061l-.707-.707a.75.75 0 0 1 0-1.061ZM11.89 12.95a.75.75 0 0 1 1.06 0l.707.707a.75.75 0 0 1-1.06 1.061l-.707-.707a.75.75 0 0 1 0-1.061ZM2.343 12.596a.75.75 0 0 1 0-1.06l.707-.707a.75.75 0 0 1 1.061 1.06l-.707.708a.75.75 0 0 1-1.061 0ZM11.89 3.05a.75.75 0 0 1 0-1.06l.707-.707a.75.75 0 0 1 1.061 1.06l-.707.707a.75.75 0 0 1-1.061 0Z"/></svg>
+        <svg class="icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9.598 1.591a.75.75 0 0 1 .785-.175 7 7 0 1 1-9.9 9.9.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.07-7.07.75.75 0 0 1 .084-.765Z"/></svg>
+      </button>
     </nav>
   </div>
 </header>
@@ -38,7 +41,7 @@
 {{content}}
 </main>
 <footer class="site-footer">
-  <div class="container">© 2026 我的博客 · 由纯静态生成器构建</div>
+  <div class="container">© 2026 我的博客</div>
 </footer>
 <script>
 document.getElementById('theme-toggle')?.addEventListener('click', function(){
@@ -46,8 +49,6 @@ document.getElementById('theme-toggle')?.addEventListener('click', function(){
   var next = cur === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   try{ localStorage.setItem('theme', next); }catch(e){}
-  // 同步 Giscus 评论区主题
-  window.postMessage({ giscus: { setConfig: { theme: next } } }, '*');
 });
 // 仅当博客在本地运行（serve.py）时显示「写文章」入口，云端部署自动隐藏
 (function(){

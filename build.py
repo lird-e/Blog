@@ -32,17 +32,40 @@ BASE_PATH = urlparse(SITE_URL).path.rstrip("/")  # "/Blog"
 # 绕过 GitHub Pages 的 10 分钟浏览器缓存，改样式后用户刷新即可拿到新版
 CSS_VER = int(time.time())
 
-# Giscus 评论配置：到 https://giscus.app 获取 repo-id / category-id
-# 前置：GitHub 公开仓库 + 开启 Discussions + 安装 Giscus App
-# 把 repo_id / category_id 换成真实值后，文章页会自动启用评论
-GISCUS = {
-    "repo": "your-username/your-blog",
-    "repo_id": "YOUR_REPO_ID",
-    "category": "Announcements",
-    "category_id": "YOUR_CATEGORY_ID",
-    "mapping": "pathname",
+# Waline 评论配置：已暂停评论功能（保持纯静态部署）。
+# 未来想启用：部署服务端后把地址填到 server_url 即可（见 docs/Waline部署指南.md）
+WALINE = {
+    "server_url": "",        # 形如 https://your-project.service.tcloudbaseapp.com
     "lang": "zh-CN",
 }
+
+
+def waline_html():
+    url = WALINE["server_url"].strip().rstrip("/")
+    if not url:
+        # 未配置服务端：不渲染任何评论区元素，保持纯静态页面
+        return ""
+    return (
+        '<section class="comments">\n'
+        '  <div id="waline"></div>\n'
+        '  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@waline/client@3/dist/waline.css"\n'
+        '        onerror="this.onerror=null;this.href=\'https://unpkg.com/@waline/client@v3/dist/waline.css\'">\n'
+        '  <script type="module">\n'
+        "    (async function(){\n"
+        '      var mod;\n'
+        "      try { mod = await import('https://cdn.jsdelivr.net/npm/@waline/client@3/dist/waline.js'); }\n"
+        '      catch(e) { mod = await import(\'https://unpkg.com/@waline/client@v3/dist/waline.js\'); }\n'
+        '      mod.init({\n'
+        "        el: '#waline',\n"
+        f'        serverURL: "{url}",\n'
+        f'        lang: "{WALINE["lang"]}",\n'
+        '        dark: \'html[data-theme="dark"]\',\n'
+        '        reaction: true\n'
+        '      });\n'
+        '    })();\n'
+        "  </script>\n"
+        "</section>"
+    )
 
 
 def parse_frontmatter(text):
@@ -125,31 +148,6 @@ def rss_date(d):
         return dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
     except Exception:
         return ""
-
-
-def giscus_html():
-    g = GISCUS
-    if g["repo_id"] == "YOUR_REPO_ID":
-        return "<!-- Giscus 未配置：在 build.py 填写 GISCUS 后自动启用评论 -->"
-    return (
-        '<section class="comments">\n'
-        '  <script src="https://giscus.app/client.js"\n'
-        f'          data-repo="{g["repo"]}"\n'
-        f'          data-repo-id="{g["repo_id"]}"\n'
-        f'          data-category="{g["category"]}"\n'
-        f'          data-category-id="{g["category_id"]}"\n'
-        f'          data-mapping="{g["mapping"]}"\n'
-        '          data-strict="0"\n'
-        '          data-reactions-enabled="1"\n'
-        '          data-emit-metadata="0"\n'
-        '          data-input-position="bottom"\n'
-        '          data-theme="preferred_color_scheme"\n'
-        f'          data-lang="{g["lang"]}"\n'
-        '          data-loading="lazy"\n'
-        '          crossorigin="anonymous" async>\n'
-        '  </script>\n'
-        '</section>'
-    )
 
 
 base_tpl = (TEMPLATES / "base.html").read_text(encoding="utf-8")
@@ -288,7 +286,7 @@ out_posts.mkdir(parents=True, exist_ok=True)
 for p in posts:
     body = fill(post_tpl, title=escape(p["title"]), date=escape(p["date"]),
                 tags_html=tag_links(p["tags_list"], "../"),
-                content=p["html"], base="../", giscus=giscus_html())
+                content=p["html"], base="../", comments=waline_html())
     (out_posts / (p["slug"] + ".html")).write_text(
         page(p["title"], body, base="../", description=p["excerpt"],
              url_path=f"posts/{p['slug']}.html", og_type="article"),
@@ -336,7 +334,7 @@ if about_src.exists():
     meta, body = parse_frontmatter(about_src.read_text(encoding="utf-8"))
     about_html = fill(post_tpl, title=escape(meta.get("title", "关于")), date="",
                       tags_html="", content=render_markdown(body), base="",
-                      giscus="")
+                      comments="")
     (PUBLIC / "about.html").write_text(
         page(meta.get("title", "关于"), about_html, base="",
              url_path="about.html"), encoding="utf-8")
