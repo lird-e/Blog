@@ -1,6 +1,6 @@
 ---
 title: Transformer 原理
-date: '2026-09-18'
+date: '2026-09-19'
 tags: Transformer, 注意力机制, 深度学习
 excerpt: 面向零基础起步，把 2017 年《Attention Is All You Need》这篇改变 AI 历史的论文拆开讲清楚：为什么需要它、它由哪些部件组成、注意力机制到底怎么算，以及它如何一步步演变成今天的大模型。 目录 一、Transfo…
 ---
