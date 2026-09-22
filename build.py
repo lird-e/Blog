@@ -1,7 +1,7 @@
 """纯静态博客生成器：把 content/ 下的 Markdown 渲染成 public/ 静态站点。
 用法：.venv/Scripts/python build.py
 """
-import re, shutil, json, math, time
+import re, shutil, json, math, hashlib
 import html as _html
 from pathlib import Path
 from collections import defaultdict
@@ -28,9 +28,19 @@ PAGE_SIZE = 10                                   # 每页文章数，超过自�
 # 站点部署的子路径前缀（如 /Blog），用于 404 页的站点绝对路径
 BASE_PATH = urlparse(SITE_URL).path.rstrip("/")  # "/Blog"
 
-# CSS 缓存版本：每次构建取时间戳，拼到样式链接 ?v= 参数上，
-# 绕过 GitHub Pages 的 10 分钟浏览器缓存，改样式后用户刷新即可拿到新版
-CSS_VER = int(time.time())
+# CSS 缓存版本：对样式内容（style.css + 两份 Pygments 生成样式）做哈希，
+# 拼到样式链接 ?v= 参数上——内容没变 URL 就不变，浏览器缓存持续有效；
+# 改样式后哈希自动变化，用户无需强刷即可拿到新版
+PYGMENTS_CSS = HtmlFormatter(style="default").get_style_defs(".codehilite")
+# 深色模式专用高亮：get_style_defs 的选择器前缀限定在 [data-theme="dark"] 下生效，
+# 与浅色高亮共存互不干扰
+PYGMENTS_DARK_CSS = HtmlFormatter(style="github-dark").get_style_defs('[data-theme="dark"] .codehilite')
+
+_css_hash = hashlib.md5()
+_css_hash.update((ASSETS / "style.css").read_bytes())
+_css_hash.update(PYGMENTS_CSS.encode("utf-8"))
+_css_hash.update(PYGMENTS_DARK_CSS.encode("utf-8"))
+CSS_VER = _css_hash.hexdigest()[:8]
 
 # Waline 评论配置：已暂停评论功能（保持纯静态部署）。
 # 未来想启用：部署服务端后把地址填到 server_url 即可（见 docs/Waline部署指南.md）
@@ -109,7 +119,9 @@ def slug_source(meta, f):
 
 def render_markdown(body):
     md = markdown.Markdown(extensions=["fenced_code", "codehilite", "toc", "tables"])
-    return md.convert(body)
+    html = md.convert(body)
+    # 正文图片默认懒加载 + 异步解码，减少首屏请求数（构建期一次性注入）
+    return re.sub(r"<img ", '<img loading="lazy" decoding="async" ', html)
 
 
 def tag_list(tags):
@@ -159,9 +171,14 @@ search_tpl = (TEMPLATES / "search.html").read_text(encoding="utf-8")
 
 
 def fill(tpl, **kw):
-    for k, v in kw.items():
-        tpl = tpl.replace("{{" + k + "}}", str(v))
-    return tpl
+    # 一次性正则替换：re.sub 不会重扫替换后的文本，
+    # 因此正文里字面出现的 {{base}} / {{extra_head}} / {{css_ver}} 等不会被
+    # 后续替换误改写（朴素 str.replace 链会导致含占位符的文章页面静默损坏，
+    # 例如提示词模板 / Jinja2 示例里常见的 {{变量}} 写法）。
+    if not kw:
+        return tpl
+    pattern = re.compile("|".join(re.escape("{{" + k + "}}") for k in kw))
+    return pattern.sub(lambda m: str(kw[m.group(0)[2:-2]]), tpl)
 
 
 # 构建前清空 public/：避免改 slug / 删文章后旧 HTML 残留成死链。
@@ -176,6 +193,8 @@ def page(title, content, base="", css_ver=CSS_VER, description=SITE_DESC,
     url_path：站内相对路径（如 'posts/xxx.html'），空字符串表示首页，
     用于拼 canonical / og:url 绝对地址。"""
     url = SITE_URL + ("/" + url_path if url_path else "/")
+    # 默认社交分享封面（1200×630，见 assets/og-cover.png）
+    og_image = f"{SITE_URL}/assets/og-cover.png"
     extra_head = (
         f'<meta name="description" content="{esc_attr(description)}">\n'
         f'<link rel="canonical" href="{escape(url)}">\n'
@@ -183,16 +202,19 @@ def page(title, content, base="", css_ver=CSS_VER, description=SITE_DESC,
         f'<meta property="og:description" content="{esc_attr(description)}">\n'
         f'<meta property="og:url" content="{escape(url)}">\n'
         f'<meta property="og:type" content="{og_type}">\n'
+        f'<meta property="og:image" content="{escape(og_image)}">\n'
+        f'<meta property="og:image:width" content="1200">\n'
+        f'<meta property="og:image:height" content="630">\n'
         f'<meta property="og:site_name" content="{esc_attr(SITE_TITLE)}">\n'
-        f'<meta name="twitter:card" content="summary">\n'
+        f'<meta name="twitter:card" content="summary_large_image">\n'
         f'<meta name="twitter:title" content="{esc_attr(title)}">\n'
-        f'<meta name="twitter:description" content="{esc_attr(description)}">'
+        f'<meta name="twitter:description" content="{esc_attr(description)}">\n'
+        f'<meta name="twitter:image" content="{escape(og_image)}">'
     )
     if noindex:
         extra_head += '\n<meta name="robots" content="noindex">'
-    # 注意 fill 替换顺序：title → content → base → extra_head → css_ver。
-    # extra_head 在 base 之后注入，其中不能含 {{base}} 占位符（上面已用
-    # f-string 预渲染绝对 URL），也不会被前面的替换误伤。
+    # fill 为一次性正则替换（不重扫替换文本），替换顺序不再影响结果；
+    # extra_head 中不能含 {{base}} 占位符（上面已用 f-string 预渲染绝对 URL）。
     return fill(base_tpl, title=escape(title), content=content, base=base,
                 extra_head=extra_head, css_ver=css_ver)
 
@@ -241,8 +263,9 @@ for p in posts:
     used.add(p["slug"])
 
 # 按 frontmatter 发布日期降序（date 缺失/非法的排最后），
-# 不能按文件名排序：serve.py/Decap 生成的文件名可能没有日期前缀
-posts.sort(key=lambda p: (p["date"] == "", p["date"]), reverse=True)
+# 不能按文件名排序：serve.py/Decap 生成的文件名可能没有日期前缀。
+# key 首位用 != 判断：reverse=True 时 (True, date) 在前，无日期 (False, "") 垫底。
+posts.sort(key=lambda p: (p["date"] != "", p["date"]), reverse=True)
 
 # 按标签归类
 tag_map = defaultdict(list)
@@ -344,7 +367,7 @@ search_body = fill(search_tpl, base="")
 (PUBLIC / "search.html").write_text(
     page("搜索", search_body, base="", url_path="search.html", noindex=True), encoding="utf-8")
 
-# 生成搜索索引
+# 生成搜索索引（紧凑 JSON 不加缩进；正文截 1000 字符，控制索引体积）
 search_entries = []
 for p in posts:
     text = re.sub(r"<[^>]+>", "", p["html"])
@@ -354,10 +377,11 @@ for p in posts:
         "date": p["date"],
         "tags": p["tags_list"],
         "excerpt": p["excerpt"],
-        "text": text[:3000],
+        "text": text[:1000],
     })
 (PUBLIC / "search.json").write_text(
-    json.dumps(search_entries, ensure_ascii=False, indent=2), encoding="utf-8")
+    json.dumps(search_entries, ensure_ascii=False, separators=(",", ":")),
+    encoding="utf-8")
 
 # 复制静态资源
 if ASSETS.exists():
@@ -368,15 +392,10 @@ ADMIN = ROOT / "admin"
 if ADMIN.exists():
     shutil.copytree(ADMIN, PUBLIC / "admin", dirs_exist_ok=True)
 
-# 生成代码高亮样式
+# 生成代码高亮样式（内容已在文件头部生成并纳入 CSS_VER 哈希）
 (PUBLIC / "assets").mkdir(parents=True, exist_ok=True)
-(PUBLIC / "assets" / "pygments.css").write_text(
-    HtmlFormatter(style="default").get_style_defs(".codehilite"), encoding="utf-8")
-# 深色模式专用高亮：get_style_defs 的选择器前缀限定在 [data-theme="dark"] 下生效，
-# 与浅色高亮共存互不干扰
-(PUBLIC / "assets" / "pygments-dark.css").write_text(
-    HtmlFormatter(style="github-dark").get_style_defs('[data-theme="dark"] .codehilite'),
-    encoding="utf-8")
+(PUBLIC / "assets" / "pygments.css").write_text(PYGMENTS_CSS, encoding="utf-8")
+(PUBLIC / "assets" / "pygments-dark.css").write_text(PYGMENTS_DARK_CSS, encoding="utf-8")
 
 # 生成 RSS
 rss_items = []
@@ -393,11 +412,13 @@ for p in posts:
     )
 rss = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
-    '<rss version="2.0">\n'
+    '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
     "  <channel>\n"
     f"    <title>{escape(SITE_TITLE)}</title>\n"
     f"    <link>{SITE_URL}</link>\n"
     f"    <description>{escape(SITE_DESC)}</description>\n"
+    f'    <atom:link rel="self" type="application/rss+xml" href="{escape(SITE_URL + "/feed.xml")}"/>\n'
+    f"    <lastBuildDate>{datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')}</lastBuildDate>\n"
     "    <language>zh-CN</language>\n"
     + "\n".join(rss_items)
     + "\n  </channel>\n</rss>\n"

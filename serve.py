@@ -19,6 +19,11 @@ CONTENT_POSTS = ROOT / "content" / "posts"
 BUILD = ROOT / "build.py"
 PORT = 8000
 
+# 与 build.py 保持一致的站点地址；取其路径部分作为线上子路径前缀（"/Blog"）。
+# 文章正文里的图片引用是 /Blog/assets/... 绝对路径，本地预览时需剥掉该前缀。
+SITE_URL = "https://lird-e.github.io/Blog"
+BASE_PATH = urlparse(SITE_URL).path.rstrip("/")
+
 
 def slugify(title):
     s = re.sub(r"[^\w\u4e00-\u9fff]+", "-", title).strip("-").lower()
@@ -45,14 +50,16 @@ def list_posts_html():
     files = list(CONTENT_POSTS.glob("*.md"))
     if not files:
         return '<li class="empty">还没有文章，发一篇吧。</li>'
-    # 与 build.py 一致：按 frontmatter 的 date 字段降序，date 缺失排最后。
-    # 不能按文件名排序：serve.py 新发的文件名是 slug.md（字母开头），
-    # 会排到 2026-xx-xx-*.md 数字前缀文件之后，新文章沉底。
+    # slug 计算与 build.py 一致：优先 frontmatter 显式 slug，回退标题；
+    # 并按 build.py 相同的遍历顺序（glob 顺序）去重加 -2 后缀，
+    # 保证列表链接与生成的 HTML 文件一一对应，不再链到 404。
     items = []
+    seen = set()
     for f in files:
         text = f.read_text(encoding="utf-8")
         m = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
         title = f.stem
+        slug_raw = ""
         date = ""
         if m:
             # 用 yaml 解析，兼容带引号的值（safe_dump 对含特殊字符的标题会加引号）
@@ -64,12 +71,24 @@ def list_posts_html():
                 title = str(meta.get("title") or f.stem)
                 d = meta.get("date")
                 date = str(d)[:10] if d is not None else ""
-        items.append((date, title, f))
-    items.sort(key=lambda x: (x[0] == "", x[0]), reverse=True)
+                s = meta.get("slug")
+                if isinstance(s, str) and s.strip():
+                    slug_raw = s.strip()
+        s = slugify(slug_raw or title)
+        if s in seen:
+            n = 2
+            while f"{s}-{n}" in seen:
+                n += 1
+            s = f"{s}-{n}"
+        seen.add(s)
+        items.append((date, title, s))
+    # 按 frontmatter date 降序、无日期排最后（与 build.py 的排序保持一致）。
+    # 不能按文件名排序：serve.py 新发的文件名是 slug.md（字母开头），
+    # 会排到 2026-xx-xx-*.md 数字前缀文件之后，新文章沉底。
+    items.sort(key=lambda x: (x[0] != "", x[0]), reverse=True)
     out = []
-    for date, title, f in items:
-        slug = slugify(title)
-        out.append(f'<li><a href="/posts/{slug}.html" target="_blank">{html_mod.escape(title)}</a></li>')
+    for date, title, slug in items:
+        out.append(f'<li><a href="/posts/{quote(slug)}.html" target="_blank">{html_mod.escape(title)}</a></li>')
     return "\n".join(out)
 
 
@@ -152,6 +171,12 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path in ("/admin", "/admin/"):
             self._admin()
             return
+        # 线上站点部署在 /Blog/ 子路径下，文章正文里的图片引用是
+        # /Blog/assets/... 绝对路径；本地把 public/ 托管在根路径，
+        # 需剥掉该前缀，否则本地预览带图文章全部 404。
+        if BASE_PATH and (parsed.path + "/").startswith(BASE_PATH + "/"):
+            self.path = self.path[len(BASE_PATH):] or "/"
+            parsed = urlparse(self.path)
         if parsed.path in ("", "/"):
             self.path = "/index.html"
         super().do_GET()

@@ -3,12 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 移动端浏览器地址栏配色：随明暗主题切换（下方脚本初始化/更新） -->
+<meta name="theme-color" content="#ffffff">
 <script>
 (function(){
   try{
     var t = localStorage.getItem('theme');
     if(!t){ t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
     document.documentElement.setAttribute('data-theme', t);
+    var m = document.querySelector('meta[name="theme-color"]');
+    if(m){ m.setAttribute('content', t === 'dark' ? '#0d1117' : '#ffffff'); }
   }catch(e){}
 })();
 </script>
@@ -49,6 +53,8 @@ document.getElementById('theme-toggle')?.addEventListener('click', function(){
   var next = cur === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   try{ localStorage.setItem('theme', next); }catch(e){}
+  var m = document.querySelector('meta[name="theme-color"]');
+  if(m){ m.setAttribute('content', next === 'dark' ? '#0d1117' : '#ffffff'); }
 });
 // 仅当博客在本地运行（serve.py）时显示「写文章」入口，云端部署自动隐藏
 (function(){

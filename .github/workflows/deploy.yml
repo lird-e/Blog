@@ -26,7 +26,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # 与本地开发版本保持一致（README 技术栈声明 3.13）
+          python-version: "3.13"
+          cache: pip
 
       - name: Install dependencies
         run: pip install -r requirements.txt

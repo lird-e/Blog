@@ -1,4 +1,4 @@
-# 构建/本地服务依赖
-markdown
-pygments
-pyyaml
+# 构建/本地服务依赖（固定版本，与本地 .venv 实际安装版本一致，保证 CI 构建可复现）
+markdown==3.10.3
+pygments==2.21.0
+pyyaml==6.0.3
