@@ -1,0 +1,23 @@
+# systemd 服务：部署到 /etc/systemd/system/blog-api.service
+# 启用：systemctl daemon-reload && systemctl enable --now blog-api
+[Unit]
+Description=Blog API (Go/Gin)
+After=network.target
+
+[Service]
+User=blog
+Group=blog
+WorkingDirectory=/var/blog/server
+# 敏感配置（ADMIN_USER / ADMIN_PASS_HASH / JWT_SECRET / IP_SALT / SITE_URL）存 .env，权限 600
+EnvironmentFile=/var/blog/.env
+ExecStart=/var/blog/server/blog-api
+Restart=always
+RestartSec=3
+
+# 基础加固
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/blog
+
+[Install]
+WantedBy=multi-user.target
