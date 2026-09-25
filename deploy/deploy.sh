@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 服务器发布脚本：拉取 Gitee 镜像 → 构建 Go 后端 + React 前端 → 重启服务。
+# 服务器发布脚本：拉取 GitHub 最新代码 → 构建 Go 后端 + React 前端 → 重启服务。
 # 用法：ssh 上服务器后执行 /var/blog/deploy.sh
 set -euo pipefail
 
@@ -8,8 +8,8 @@ OUT_SERVER=/var/blog/server
 OUT_WEB=/var/blog/web
 
 cd "$SRC"
-echo "==> git pull (gitee main)"
-git pull gitee main
+echo "==> git pull (origin main)"
+git pull origin main
 
 echo "==> build go backend"
 cd "$SRC/server"

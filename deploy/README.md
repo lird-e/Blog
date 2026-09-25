@@ -6,7 +6,6 @@
 
 - Ubuntu 20.04+ 云服务器（Ubuntu 22.04 为例），有 root 或 sudo 权限
 - 本地已有 GitHub 仓库 `lird-e/Blog`（main 分支）
-- Gitee 账号 `manboman`，新建**私有/公开仓库** `manboman/Blog` 作为镜像
 
 ## 1. 服务器初始化（方案 阶段 0）
 
@@ -46,24 +45,18 @@ EOF
 source /etc/profile.d/dev.sh
 ```
 
-## 2. 代码同步：GitHub(本地 push) + Gitee(服务器 pull)
+## 2. 代码同步：GitHub 单远端
 
-本地仓库添加 Gitee 远端并双推：
-
-```bash
-git remote add gitee https://gitee.com/manboman/Blog.git
-git push gitee main
-# 之后每次发布：git push origin main && git push gitee main
-```
-
-服务器上克隆（走国内线路）：
+服务器直接克隆 GitHub 仓库（只读拉取，不在服务器上 push）：
 
 ```bash
-sudo -u blog git clone https://gitee.com/manboman/Blog.git /var/blog/src
+sudo -u blog git clone https://github.com/lird-e/Blog.git /var/blog/src
 cd /var/blog/src && sudo -u blog git remote set-url --push origin DISABLED
 ```
 
-> Gitee 仓库可在 GitHub Actions 里自动同步（见方案风险 6），先用"强制同步"按钮手动保底。
+> 国内服务器直连 GitHub 可能偏慢或不稳定，可给 git 配置代理（如服务器上有可用代理：
+> `sudo -u blog git config --global http.proxy http://127.0.0.1:端口`），
+> 或退回「GitHub push + Gitee 镜像 pull」的双远端方案。
 
 ## 3. 安装 Nginx 配置与 systemd
 
@@ -125,7 +118,7 @@ GitHub 仓库 → Settings → Pages → Source 选 "None"。
 
 ```bash
 # 本地
-git push origin main && git push gitee main
+git push origin main
 # 服务器
 ssh 你的服务器 "sudo -u blog /var/blog/deploy.sh"
 ```
