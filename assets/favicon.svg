@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#2f6f4f"/>
-  <text x="32" y="45" font-size="36" text-anchor="middle" fill="#ffffff"
-        font-family="'Songti SC','SimSun',serif" font-weight="bold">博</text>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="#2563eb"/>
+  <rect x="16" y="19" width="32" height="6.5" rx="3.25" fill="#ffffff"/>
+  <rect x="16" y="30.5" width="32" height="6.5" rx="3.25" fill="#ffffff" opacity=".88"/>
+  <rect x="16" y="42" width="21" height="6.5" rx="3.25" fill="#ffffff" opacity=".72"/>
+  <circle cx="45" cy="45.25" r="3.25" fill="#ffffff" opacity=".72"/>
 </svg>
