@@ -258,7 +258,8 @@ func (d *DB) IncrViews(slug string) {
 }
 
 // UpsertPost 迁移/创建通用写入：slug 冲突时更新内容但保留 id、views，
-// 保证已有评论（外键 post_id）不受影响。
+// 保证已有评论（外键 post_id）不受影响。created_at 一并覆盖，
+// 使 content/ frontmatter 的日期调整可通过重复执行 migrate 入库。
 func (d *DB) UpsertPost(p *Post) (int64, error) {
 	res, err := d.Exec(`
 INSERT INTO posts (slug, title, excerpt, content_md, content_html, tags, published, created_at, updated_at)
@@ -266,7 +267,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(slug) DO UPDATE SET
   title = excluded.title, excerpt = excluded.excerpt,
   content_md = excluded.content_md, content_html = excluded.content_html,
-  tags = excluded.tags, published = excluded.published, updated_at = excluded.updated_at`,
+  tags = excluded.tags, published = excluded.published,
+  created_at = excluded.created_at, updated_at = excluded.updated_at`,
 		p.Slug, p.Title, p.Excerpt, p.ContentMD, p.ContentHTML, p.Tags,
 		boolToInt(p.Published), p.CreatedAt, p.UpdatedAt)
 	if err != nil {
