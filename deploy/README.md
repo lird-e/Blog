@@ -45,6 +45,12 @@ EOF
 source /etc/profile.d/dev.sh
 ```
 
+> 1.6 小内存机器（≤2G）先加 swap，避免 vite build OOM：
+> ```bash
+> fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+> echo '/swapfile none swap sw 0 0' >> /etc/fstab
+> ```
+
 ## 2. 代码同步：GitHub 单远端
 
 服务器直接克隆 GitHub 仓库（只读拉取，不在服务器上 push）：
@@ -56,14 +62,20 @@ cd /var/blog/src && sudo -u blog git remote set-url --push origin DISABLED
 
 > 国内服务器直连 GitHub 可能偏慢或不稳定，可给 git 配置代理（如服务器上有可用代理：
 > `sudo -u blog git config --global http.proxy http://127.0.0.1:端口`），
-> 或退回「GitHub push + Gitee 镜像 pull」的双远端方案。
+> 或用镜像加速前缀（实测 ghfast.top 可用；origin 保持原地址，仅 fetch 走加速）：
+> ```bash
+> sudo -u blog git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"
+> ```
+> 加速镜像失效时换前缀或删掉这条配置即可。
 
 ## 3. 安装 Nginx 配置与 systemd
 
 ```bash
-# 3.1 Nginx 限流区域：在 /etc/nginx/nginx.conf 的 http {} 块内加入
-#   limit_req_zone $binary_remote_addr zone=api:10m   rate=10r/s;
-#   limit_req_zone $binary_remote_addr zone=admin:10m rate=1r/s;
+# 3.1 Nginx 限流区域：用 conf.d 注入 http 块（无需改 nginx.conf）
+cat > /etc/nginx/conf.d/blog-ratelimit.conf <<'EOF'
+limit_req_zone $binary_remote_addr zone=api:10m   rate=10r/s;
+limit_req_zone $binary_remote_addr zone=admin:10m rate=1r/s;
+EOF
 sudo cp /var/blog/src/deploy/nginx-blog.conf /etc/nginx/sites-available/blog
 sudo ln -sf /etc/nginx/sites-available/blog /etc/nginx/sites-enabled/blog
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -95,11 +107,24 @@ sudo chmod 600 /var/blog/.env
 ## 5. 首次发布
 
 ```bash
+# 5.0 前置：deploy.sh 以 blog 用户执行，systemctl 重启需要免密白名单
+cat > /etc/sudoers.d/blog-deploy <<'EOF'
+blog ALL=(root) NOPASSWD: /usr/bin/systemctl restart blog-api, /usr/bin/systemctl is-active blog-api
+EOF
+chmod 440 /etc/sudoers.d/blog-deploy && visudo -c
+
+# 5.0b Go/npm 持久走国内源（对 deploy.sh 的非交互 shell 也生效）
+sudo -u blog env HOME=/home/blog /usr/local/go/bin/go env -w GOPROXY=https://goproxy.cn,direct
+sudo -u blog env HOME=/home/blog npm config set registry https://registry.npmmirror.com
+
+# 5.1 首次发布
 sudo cp /var/blog/src/deploy/deploy.sh /var/blog/deploy.sh
 sudo chown blog:blog /var/blog/deploy.sh && sudo chmod +x /var/blog/deploy.sh
 sudo -u blog /var/blog/deploy.sh
 # 浏览器访问 http://服务器公网IP 验证；后台在 /admin
 ```
+
+> 仓库更新 deploy.sh 后需重新复制到 /var/blog/deploy.sh 才会生效（脚本执行的是复制件）。
 
 ## 6. 每日备份（cron）
 

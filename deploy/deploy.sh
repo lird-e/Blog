@@ -13,7 +13,8 @@ git pull origin main
 
 echo "==> build go backend"
 cd "$SRC/server"
-go build -o "$OUT_SERVER/blog-api" ./cmd/server
+# GOPROXY: 国内服务器 proxy.golang.org 不可达，走 goproxy.cn
+GOPROXY=https://goproxy.cn,direct go build -o "$OUT_SERVER/blog-api" ./cmd/server
 
 echo "==> build react frontend"
 cd "$SRC/web"
@@ -27,8 +28,9 @@ mv "$OUT_WEB/dist.new" "$OUT_WEB/dist"
 rm -rf "$OUT_WEB/dist.old"
 
 echo "==> restart blog-api"
-systemctl restart blog-api
+# blog 用户通过 sudoers 免密白名单重启服务（见 deploy/README.md 第 5 节）
+sudo /usr/bin/systemctl restart blog-api
 sleep 1
-systemctl is-active blog-api >/dev/null && echo "deploy done: $(date)" || {
+sudo -n /usr/bin/systemctl is-active blog-api >/dev/null && echo "deploy done: $(date)" || {
   echo "blog-api 启动失败，查看日志：journalctl -u blog-api -n 50"; exit 1;
 }

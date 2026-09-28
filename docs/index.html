@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="2; url=http://47.106.82.66">
+<title>我的博客 · 已迁移</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa;
+    color: #2c3e50;
+  }
+  .card {
+    text-align: center;
+    background: #fff;
+    border: 1px solid #e5e9ef;
+    border-radius: 14px;
+    padding: 48px 56px;
+    box-shadow: 0 6px 24px rgba(30, 50, 80, .06);
+    max-width: 420px;
+  }
+  .spinner {
+    width: 34px;
+    height: 34px;
+    margin: 0 auto 22px;
+    border: 3px solid #d8e2f0;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 10px; }
+  p { font-size: 14px; color: #6b7a90; line-height: 1.7; }
+  a {
+    display: inline-block;
+    margin: 16px 0 8px;
+    font-size: 15px;
+    color: #3b82f6;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  a:hover { text-decoration: underline; }
+  .tip { font-size: 12px; color: #9aa7b8; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="spinner"></div>
+  <h1>我的博客</h1>
+  <p>博客已迁移至云服务器<br>正在为你跳转…</p>
+  <a href="http://47.106.82.66">http://47.106.82.66</a>
+  <p class="tip">若未自动跳转，请点击上方链接</p>
+</main>
+<script>location.replace("http://47.106.82.66");</script>
+<noscript><meta http-equiv="refresh" content="0; url=http://47.106.82.66"></noscript>
+</body>
+</html>
