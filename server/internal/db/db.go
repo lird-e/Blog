@@ -33,18 +33,31 @@ type Post struct {
 }
 
 type Comment struct {
-	ID        int64  `json:"id"`
-	PostID    int64  `json:"post_id"`
-	ParentID  int64  `json:"parent_id,omitempty"`
-	Nickname  string `json:"nickname"`
-	EmailHash string `json:"email_hash,omitempty"`
-	Content   string `json:"content"`
-	IPHash    string `json:"-"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
+	ID          int64  `json:"id"`
+	PostID      int64  `json:"post_id"`
+	ParentID    int64  `json:"parent_id,omitempty"`
+	Nickname    string `json:"nickname"`
+	EmailHash   string `json:"email_hash,omitempty"`
+	Content     string `json:"content"`
+	IPHash      string `json:"-"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"created_at"`
+	CommenterID int64  `json:"commenter_id,omitempty"` // GitHub 登录身份（0 = 游客）
+	AvatarURL   string `json:"avatar_url,omitempty"`   // 登录评论的头像快照（评论时定格）
 	// 管理端列表额外带出所属文章信息
 	PostSlug  string `json:"post_slug,omitempty"`
 	PostTitle string `json:"post_title,omitempty"`
+}
+
+// Commenter OAuth 登录的评论者身份（当前支持 github）。
+type Commenter struct {
+	ID         int64  `json:"id"`
+	Provider   string `json:"provider"`
+	ExternalID string `json:"-"`
+	Nickname   string `json:"nickname"`
+	AvatarURL  string `json:"avatar_url"`
+	CreatedAt  string `json:"created_at"`
+	LastSeenAt string `json:"last_seen_at"`
 }
 
 func Open(path string) (*DB, error) {
@@ -96,6 +109,15 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS commenters (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider     TEXT NOT NULL DEFAULT 'github',
+  external_id  TEXT UNIQUE NOT NULL,
+  nickname     TEXT NOT NULL,
+  avatar_url   TEXT DEFAULT '',
+  created_at   TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS redirects (
   old_slug TEXT PRIMARY KEY,
   new_slug TEXT NOT NULL
@@ -103,7 +125,45 @@ CREATE TABLE IF NOT EXISTS redirects (
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 `
-	_, err := d.Exec(schema)
+	if _, err := d.Exec(schema); err != nil {
+		return err
+	}
+	// 一次性数据迁移（幂等）：历史 email_hash 为加盐 SHA-256（64 位 hex），
+	// 与 Cravatar 头像协议（未加盐 MD5，32 位）不兼容、永远无法匹配；
+	// 无法反推邮箱，直接清空让老评论回退为首字母占位。
+	if _, err := d.Exec(`UPDATE comments SET email_hash = '' WHERE LENGTH(email_hash) = 64`); err != nil {
+		return err
+	}
+	// comments 表补 OAuth 登录相关列（幂等，SQLite 无 ADD COLUMN IF NOT EXISTS）
+	if err := d.ensureColumn("comments", "commenter_id", `commenter_id INTEGER DEFAULT 0`); err != nil {
+		return err
+	}
+	return d.ensureColumn("comments", "avatar_url", `avatar_url TEXT DEFAULT ''`)
+}
+
+// ensureColumn 幂等加列：查表结构，列不存在才执行 ALTER。
+// ddl 为完整列定义（如 "commenter_id INTEGER DEFAULT 0"）。
+func (d *DB) ensureColumn(table, column, ddl string) error {
+	rows, err := d.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, ctype string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = d.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s`, table, ddl))
 	return err
 }
 
@@ -386,10 +446,10 @@ func (d *DB) TagCounts() ([]map[string]any, error) {
 
 func (d *DB) CreateComment(c *Comment) (int64, error) {
 	res, err := d.Exec(`
-INSERT INTO comments (post_id, parent_id, nickname, email_hash, content, ip_hash, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO comments (post_id, parent_id, nickname, email_hash, content, ip_hash, status, created_at, commenter_id, avatar_url)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.PostID, nullableID(c.ParentID), c.Nickname, c.EmailHash, c.Content, c.IPHash, c.Status,
-		time.Now().Format(time.RFC3339))
+		time.Now().Format(time.RFC3339), nullableID(c.CommenterID), c.AvatarURL)
 	if err != nil {
 		return 0, err
 	}
@@ -406,7 +466,7 @@ func nullableID(id int64) any {
 // ListCommentsByPost 游客端：仅已通过评论，按时间正序（前端组装楼中楼）。
 func (d *DB) ListCommentsByPost(postID int64) ([]Comment, error) {
 	return scanComments(d.Query(`
-SELECT id, post_id, parent_id, nickname, email_hash, content, status, created_at
+SELECT id, post_id, parent_id, nickname, email_hash, content, status, created_at, commenter_id, avatar_url
 FROM comments WHERE post_id = ? AND status = 'approved' ORDER BY created_at ASC, id ASC`, postID))
 }
 
@@ -422,7 +482,7 @@ func (d *DB) AdminListComments(status string, limit, offset int) ([]Comment, int
 	}
 	rows, err := d.Query(`
 SELECT c.id, c.post_id, c.parent_id, c.nickname, c.email_hash, c.content, c.status, c.created_at,
-       p.slug, p.title
+       c.commenter_id, c.avatar_url, p.slug, p.title
 FROM comments c JOIN posts p ON p.id = c.post_id
 WHERE `+where+` ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`,
 		append(args, limit, offset)...)
@@ -433,12 +493,13 @@ WHERE `+where+` ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`,
 	list := []Comment{}
 	for rows.Next() {
 		var c Comment
-		var parent, emailHash sql.NullString
+		var parent, emailHash, avatarURL sql.NullString
 		if err := rows.Scan(&c.ID, &c.PostID, &parent, &c.Nickname, &emailHash, &c.Content,
-			&c.Status, &c.CreatedAt, &c.PostSlug, &c.PostTitle); err != nil {
+			&c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL, &c.PostSlug, &c.PostTitle); err != nil {
 			return nil, 0, err
 		}
 		c.EmailHash = emailHash.String
+		c.AvatarURL = avatarURL.String
 		fmt.Sscan(parent.String, &c.ParentID)
 		list = append(list, c)
 	}
@@ -454,11 +515,13 @@ func scanComments(rows *sql.Rows, err error) ([]Comment, error) {
 	for rows.Next() {
 		var c Comment
 		var parent, emailHash sql.NullString
+		var avatarURL sql.NullString
 		if err := rows.Scan(&c.ID, &c.PostID, &parent, &c.Nickname, &emailHash,
-			&c.Content, &c.Status, &c.CreatedAt); err != nil {
+			&c.Content, &c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL); err != nil {
 			return nil, err
 		}
 		c.EmailHash = emailHash.String
+		c.AvatarURL = avatarURL.String
 		fmt.Sscan(parent.String, &c.ParentID)
 		list = append(list, c)
 	}
@@ -487,6 +550,43 @@ func (d *DB) GetCommentForPost(commentID, postID int64) (*Comment, error) {
 func (d *DB) DeleteComment(id int64) error {
 	_, err := d.Exec(`DELETE FROM comments WHERE id = ?`, id)
 	return err
+}
+
+// ---- 评论者（OAuth 登录身份）----
+
+// UpsertCommenter 登录时写入/刷新身份，返回内部 id。
+// external_id 唯一：同 GitHub 账号重复登录只更新昵称头像与 last_seen_at。
+func (d *DB) UpsertCommenter(provider, externalID, nickname, avatarURL string) (int64, error) {
+	now := time.Now().Format(time.RFC3339)
+	_, err := d.Exec(`
+INSERT INTO commenters (provider, external_id, nickname, avatar_url, created_at, last_seen_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(external_id) DO UPDATE SET
+  nickname = excluded.nickname, avatar_url = excluded.avatar_url, last_seen_at = excluded.last_seen_at`,
+		provider, externalID, nickname, avatarURL, now, now)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = d.QueryRow(`SELECT id FROM commenters WHERE provider = ? AND external_id = ?`,
+		provider, externalID).Scan(&id)
+	return id, err
+}
+
+// GetCommenter 按 id 取身份；不存在返回 nil（令牌有效但身份被清时前端按未登录处理）。
+func (d *DB) GetCommenter(id int64) (*Commenter, error) {
+	var cm Commenter
+	err := d.QueryRow(`
+SELECT id, provider, external_id, nickname, avatar_url, created_at, last_seen_at
+FROM commenters WHERE id = ?`, id).
+		Scan(&cm.ID, &cm.Provider, &cm.ExternalID, &cm.Nickname, &cm.AvatarURL, &cm.CreatedAt, &cm.LastSeenAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cm, nil
 }
 
 // ---- 设置 ----

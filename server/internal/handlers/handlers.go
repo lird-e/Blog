@@ -96,14 +96,18 @@ func (h *Handlers) ListComments(c *gin.Context) {
 
 // CreateComment POST /api/posts/:slug/comments
 // 防垃圾四件套（方案 4.3）：蜜罐字段、提交时间 <3s 拒绝、频率限制、IP 加盐哈希。
+// 身份两种来源（互斥，登录态优先）：
+//   - GitHub 登录（commenter_sess Cookie）：自动采用 GitHub 昵称与头像，忽略表单昵称/邮箱；
+//   - 游客 + 本机身份记忆：昵称必填，email_hash 直传（MD5(email) 记忆回带）或按邮箱现算。
 func (h *Handlers) CreateComment(c *gin.Context) {
 	var req struct {
-		Nickname string `json:"nickname"`
-		Email    string `json:"email"`
-		Content  string `json:"content"`
-		ParentID int64  `json:"parent_id"`
-		Website  string `json:"website"` // 蜜罐：页面上隐藏，人不会填
-		TS       int64  `json:"ts"`      // 表单渲染时刻（毫秒），挡无头脚本直发
+		Nickname  string `json:"nickname"`
+		Email     string `json:"email"`
+		EmailHash string `json:"email_hash"` // 身份记忆直传（32 位 hex md5），非法值忽略
+		Content   string `json:"content"`
+		ParentID  int64  `json:"parent_id"`
+		Website   string `json:"website"` // 蜜罐：页面上隐藏，人不会填
+		TS        int64  `json:"ts"`      // 表单渲染时刻（毫秒），挡无头脚本直发
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误"})
@@ -120,16 +124,27 @@ func (h *Handlers) CreateComment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "提交过快，请稍后再试"})
 		return
 	}
-	// 3) 内容校验：昵称 1~30 字、正文 1~2000 字
-	nickname := strings.TrimSpace(req.Nickname)
+	// 3) 内容校验：正文 1~2000 字；昵称仅游客需要校验（登录身份由 GitHub 提供）
 	content := strings.TrimSpace(req.Content)
-	if nickname == "" || len([]rune(nickname)) > 30 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "昵称需为 1~30 个字符"})
-		return
-	}
 	if content == "" || len([]rune(content)) > 2000 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "评论内容需为 1~2000 个字符"})
 		return
+	}
+	// GitHub 登录态优先：cookie 有效即采用其昵称与头像快照
+	commenter := h.currentCommenter(c)
+	var nickname string
+	if commenter != nil {
+		nickname = commenter.Nickname
+	} else {
+		nickname = strings.TrimSpace(req.Nickname)
+		if nickname == "" || len([]rune(nickname)) > 30 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "昵称需为 1~30 个字符"})
+			return
+		}
+		if nickname == h.DB.GetSetting("blogger_name", "博主") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该昵称为保留昵称，请换一个"})
+			return
+		}
 	}
 	ip := c.ClientIP()
 	// 4) 频率限制：同 IP 每分钟 1 条、每日 20 条
@@ -158,15 +173,26 @@ func (h *Handlers) CreateComment(c *gin.Context) {
 		status = "pending"
 	}
 	cm := &db.Comment{
-		PostID:    p.ID,
-		ParentID:  req.ParentID,
-		Nickname:  nickname,
-		EmailHash: hashWithSalt(h.Cfg.IPSalt, strings.TrimSpace(req.Email)),
-		Content:   content,
-		IPHash:    hashWithSalt(h.Cfg.IPSalt, ip),
-		Status:    status,
+		PostID:   p.ID,
+		ParentID: req.ParentID,
+		Nickname: nickname,
+		Content:  content,
+		IPHash:   hashWithSalt(h.Cfg.IPSalt, ip),
+		Status:   status,
 	}
-	if _, err := h.DB.CreateComment(cm); err != nil {
+	if commenter != nil { // GitHub 登录：身份字段来自 commenters 表，头像以 URL 快照落库
+		cm.CommenterID = commenter.ID
+		cm.AvatarURL = commenter.AvatarURL
+	} else {
+		// 邮箱哈希：填了新邮箱按新邮箱算（Cravatar 要求未加盐 MD5）；
+		// 未填但带合法的记忆哈希则直采，其余情况视为无头像。
+		cm.EmailHash = md5Hex(strings.TrimSpace(req.Email))
+		if cm.EmailHash == "" && emailHashRe.MatchString(req.EmailHash) {
+			cm.EmailHash = strings.ToLower(req.EmailHash)
+		}
+	}
+	id, err := h.DB.CreateComment(cm)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "评论写入失败"})
 		return
 	}
@@ -174,7 +200,10 @@ func (h *Handlers) CreateComment(c *gin.Context) {
 	if status == "pending" {
 		msg = "评论已提交，等待管理员审核后显示"
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": msg, "status": status})
+	c.JSON(http.StatusCreated, gin.H{
+		"message": msg, "status": status,
+		"id": id, "email_hash": cm.EmailHash, // 供前端保存身份、滚动定位
+	})
 }
 
 // ---- 工具 ----

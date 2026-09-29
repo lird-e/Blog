@@ -56,6 +56,12 @@ func main() {
 		api.GET("/posts/:slug/comments", h.ListComments)
 		api.POST("/posts/:slug/comments", h.CreateComment)
 		api.GET("/tags", h.ListTags)
+
+		// GitHub OAuth 评论者登录（未配置凭据时接口返回 503 提示）
+		api.GET("/auth/github/login", h.GitHubLogin)
+		api.GET("/auth/github/callback", h.GitHubCallback)
+		api.POST("/auth/logout", h.Logout)
+		api.GET("/me", h.Me)
 	}
 
 	// ---- 管理 API（JWT 保护，登录除外）----

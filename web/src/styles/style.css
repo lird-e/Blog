@@ -377,6 +377,12 @@ a{transition:color .15s ease;}
 .comment-form button:hover{transform:translateY(-1px);box-shadow:var(--shadow-md);}
 .comment-form button:disabled{opacity:.6;cursor:wait;transform:none;}
 .hp-field{position:absolute;left:-9999px;height:0;width:0;opacity:0;}
+.comment-identity{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.85rem;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:10px;padding:8px 12px;}
+.comment-identity .comment-avatar{width:20px;height:20px;border-radius:50%;}
+.comment-identity-loading{margin:0;}
+.comment-oauth{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.gh-login-btn{display:inline-flex;align-items:center;gap:6px;background:#24292f;color:#fff;border-radius:8px;padding:6px 12px;font-size:.85rem;text-decoration:none;transition:transform .15s,box-shadow .15s;}
+.gh-login-btn:hover{transform:translateY(-1px);box-shadow:var(--shadow-md);}
 .replying{font-size:.9rem;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:10px;padding:8px 12px;}
 .link-btn{background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:.9rem;}
 .form-ok{color:var(--accent);margin:4px 0 0;}

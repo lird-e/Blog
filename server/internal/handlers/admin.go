@@ -78,6 +78,12 @@ func (h *Handlers) AuthRequired() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
 		}
+		// 评论者令牌（commenter: 前缀）与管理员令牌同密钥签发，必须在此隔离，
+		// 防止 GitHub 登录会话冒充管理端身份。
+		if auth.IsCommenterSub(user) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "令牌无管理权限"})
+			return
+		}
 		c.Set("admin_user", user)
 		c.Next()
 	}

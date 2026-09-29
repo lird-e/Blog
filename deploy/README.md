@@ -160,8 +160,23 @@ ssh 你的服务器 "sudo -u blog /var/blog/deploy.sh"
 | 改 Nginx 后生效 | `nginx -t && systemctl reload nginx` |
 | 手动备份 | `sqlite3 /var/blog/blog.db ".backup /var/blog/backups/manual.db"` |
 
+## 9.5 GitHub OAuth 评论者登录（可选功能）
+
+评论区支持游客免填（本机记忆）与 GitHub 登录两种身份，后者需要额外配置：
+
+1. https://github.com/settings/developers → **New OAuth App**
+2. Homepage URL 填 `SITE_URL`；Authorization callback URL 填 `SITE_URL/api/auth/github/callback`
+   （当前 IP 直连阶段即 `http://47.106.82.66/api/auth/github/callback`，绑域名后回 GitHub 改并同步 `SITE_URL`）
+3. 把 Client ID / Client Secret 写入 `/var/blog/.env` 的 `GITHUB_CLIENT_ID` / `GITHUB_SECRET`（参考 deploy/env.example）
+4. `systemctl restart blog-api` 生效；两项留空则评论区只显示游客通道
+
+> ⚠ 前置检查：服务器需能访问 `https://api.github.com`（登录回调时服务端要调 GitHub API）。
+> 先验证：`curl -m 5 -sS -o /dev/null -w "%{http_code}" https://api.github.com`，
+> 超时或不通则暂缓启用（评论区游客功能不受影响）。
+
 ## 10. 安全备忘（方案 第九章）
 
 - 裸 IP 无法签发 Let's Encrypt 证书，当前为 HTTP；管理操作尽量在家用网络下进行
+- GitHub 登录会话 Cookie 在 HTTP 下无 Secure 标志（SiteURL 为 https 时自动启用）
 - 域名备案通过后：Nginx 加 443 + 证书，SITE_URL 改为 https 域名
 - 可选：`/api/admin` 加 IP 白名单或 WireGuard 内网访问

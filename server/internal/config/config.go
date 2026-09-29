@@ -12,11 +12,14 @@ type Config struct {
 	AdminPassHash string // bcrypt 哈希，由 cmd/genpass 生成
 	JWTSecret     string // JWT 签名密钥
 	IPSalt        string // 评论 IP / 邮箱加盐哈希的盐
-	SiteURL       string // 站点绝对地址（RSS/sitemap/canonical）
+	SiteURL       string // 站点绝对地址（RSS/sitemap/canonical/OAuth 回调拼接）
 	SiteTitle     string
 	SiteDesc      string
 	WebDir        string // 前端构建产物目录；非空时由 Go 直接托管（本地预览/无 Nginx 兜底）
 	Debug         bool   // gin 调试模式
+
+	GitHubClientID string // GitHub OAuth App Client ID（可选，未配置则评论区不显示 GitHub 登录）
+	GitHubSecret   string // GitHub OAuth App Client Secret
 }
 
 func getenv(key, def string) string {
@@ -39,5 +42,8 @@ func Load() *Config {
 		SiteDesc:      getenv("SITE_DESC", "记录技术、思考与生活。"),
 		WebDir:        os.Getenv("BLOG_WEB_DIR"),
 		Debug:         os.Getenv("BLOG_DEBUG") == "1",
+
+		GitHubClientID: os.Getenv("GITHUB_CLIENT_ID"),
+		GitHubSecret:   os.Getenv("GITHUB_SECRET"),
 	}
 }
