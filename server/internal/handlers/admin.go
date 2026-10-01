@@ -29,7 +29,7 @@ func slugify(s string) string {
 
 // Login POST /api/admin/login —— 失败 5 次锁 15 分钟（方案九）
 func (h *Handlers) Login(c *gin.Context) {
-	if h.Cfg.AdminPassHash == "" || h.Cfg.JWTSecret == "" {
+	if h.Cfg.AdminPassHash == "" || !h.authConfigured() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "管理端未配置（缺少 ADMIN_PASS_HASH / JWT_SECRET），参考 deploy/env.example",
 		})

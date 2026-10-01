@@ -44,6 +44,10 @@ type Comment struct {
 	CreatedAt   string `json:"created_at"`
 	CommenterID int64  `json:"commenter_id,omitempty"` // GitHub 登录身份（0 = 游客）
 	AvatarURL   string `json:"avatar_url,omitempty"`   // 登录评论的头像快照（评论时定格）
+	// Provider 登录来源（github / ...），游客为空。
+	// 前端据此判断「是否登录用户评论」，比用 avatar_url 是否存在更可靠
+	// （游客填了邮箱也有 Cravatar 头像）。
+	Provider string `json:"provider,omitempty"`
 	// 管理端列表额外带出所属文章信息
 	PostSlug  string `json:"post_slug,omitempty"`
 	PostTitle string `json:"post_title,omitempty"`
@@ -58,6 +62,9 @@ type Commenter struct {
 	AvatarURL  string `json:"avatar_url"`
 	CreatedAt  string `json:"created_at"`
 	LastSeenAt string `json:"last_seen_at"`
+	// TokenVersion 令牌版本：登录重置为 1，退出登录时递增，
+	// 使所有版本落后的旧令牌立即失效（实现服务端吊销）。
+	TokenVersion int `json:"-"`
 }
 
 func Open(path string) (*DB, error) {
@@ -116,7 +123,8 @@ CREATE TABLE IF NOT EXISTS commenters (
   nickname     TEXT NOT NULL,
   avatar_url   TEXT DEFAULT '',
   created_at   TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL
+  last_seen_at TEXT NOT NULL,
+  token_version INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS redirects (
   old_slug TEXT PRIMARY KEY,
@@ -138,7 +146,16 @@ CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 	if err := d.ensureColumn("comments", "commenter_id", `commenter_id INTEGER DEFAULT 0`); err != nil {
 		return err
 	}
-	return d.ensureColumn("comments", "avatar_url", `avatar_url TEXT DEFAULT ''`)
+	if err := d.ensureColumn("comments", "avatar_url", `avatar_url TEXT DEFAULT ''`); err != nil {
+		return err
+	}
+	// commenters 补令牌版本列，支持服务端吊销已签发的长效令牌
+	if err := d.ensureColumn("commenters", "token_version", `token_version INTEGER NOT NULL DEFAULT 1`); err != nil {
+		return err
+	}
+	// 老库中该列为 NULL 的行统一回填为 1（版本从 1 起算）
+	_, err := d.Exec(`UPDATE commenters SET token_version = 1 WHERE token_version IS NULL`)
+	return err
 }
 
 // ensureColumn 幂等加列：查表结构，列不存在才执行 ALTER。
@@ -466,8 +483,10 @@ func nullableID(id int64) any {
 // ListCommentsByPost 游客端：仅已通过评论，按时间正序（前端组装楼中楼）。
 func (d *DB) ListCommentsByPost(postID int64) ([]Comment, error) {
 	return scanComments(d.Query(`
-SELECT id, post_id, parent_id, nickname, email_hash, content, status, created_at, commenter_id, avatar_url
-FROM comments WHERE post_id = ? AND status = 'approved' ORDER BY created_at ASC, id ASC`, postID))
+SELECT c.id, c.post_id, c.parent_id, c.nickname, c.email_hash, c.content, c.status, c.created_at,
+       c.commenter_id, c.avatar_url, COALESCE(m.provider, '')
+FROM comments c LEFT JOIN commenters m ON m.id = c.commenter_id
+WHERE c.post_id = ? AND c.status = 'approved' ORDER BY c.created_at ASC, c.id ASC`, postID))
 }
 
 // AdminListComments 审核列表：按状态筛选（空 = 全部），带所属文章信息。
@@ -482,8 +501,10 @@ func (d *DB) AdminListComments(status string, limit, offset int) ([]Comment, int
 	}
 	rows, err := d.Query(`
 SELECT c.id, c.post_id, c.parent_id, c.nickname, c.email_hash, c.content, c.status, c.created_at,
-       c.commenter_id, c.avatar_url, p.slug, p.title
-FROM comments c JOIN posts p ON p.id = c.post_id
+       c.commenter_id, c.avatar_url, COALESCE(m.provider, ''), p.slug, p.title
+FROM comments c
+JOIN posts p ON p.id = c.post_id
+LEFT JOIN commenters m ON m.id = c.commenter_id
 WHERE `+where+` ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`,
 		append(args, limit, offset)...)
 	if err != nil {
@@ -495,7 +516,7 @@ WHERE `+where+` ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`,
 		var c Comment
 		var parent, emailHash, avatarURL sql.NullString
 		if err := rows.Scan(&c.ID, &c.PostID, &parent, &c.Nickname, &emailHash, &c.Content,
-			&c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL, &c.PostSlug, &c.PostTitle); err != nil {
+			&c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL, &c.Provider, &c.PostSlug, &c.PostTitle); err != nil {
 			return nil, 0, err
 		}
 		c.EmailHash = emailHash.String
@@ -517,7 +538,7 @@ func scanComments(rows *sql.Rows, err error) ([]Comment, error) {
 		var parent, emailHash sql.NullString
 		var avatarURL sql.NullString
 		if err := rows.Scan(&c.ID, &c.PostID, &parent, &c.Nickname, &emailHash,
-			&c.Content, &c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL); err != nil {
+			&c.Content, &c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL, &c.Provider); err != nil {
 			return nil, err
 		}
 		c.EmailHash = emailHash.String
@@ -556,13 +577,16 @@ func (d *DB) DeleteComment(id int64) error {
 
 // UpsertCommenter 登录时写入/刷新身份，返回内部 id。
 // external_id 唯一：同 GitHub 账号重复登录只更新昵称头像与 last_seen_at。
+// token_version 一并重置为 1：吊销后重新登录必须能恢复可用，
+// 否则会签发一个版本低于库中值的令牌，登录后立刻被判为已吊销。
 func (d *DB) UpsertCommenter(provider, externalID, nickname, avatarURL string) (int64, error) {
 	now := time.Now().Format(time.RFC3339)
 	_, err := d.Exec(`
-INSERT INTO commenters (provider, external_id, nickname, avatar_url, created_at, last_seen_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO commenters (provider, external_id, nickname, avatar_url, created_at, last_seen_at, token_version)
+VALUES (?, ?, ?, ?, ?, ?, 1)
 ON CONFLICT(external_id) DO UPDATE SET
-  nickname = excluded.nickname, avatar_url = excluded.avatar_url, last_seen_at = excluded.last_seen_at`,
+  nickname = excluded.nickname, avatar_url = excluded.avatar_url,
+  last_seen_at = excluded.last_seen_at, token_version = 1`,
 		provider, externalID, nickname, avatarURL, now, now)
 	if err != nil {
 		return 0, err
@@ -573,13 +597,39 @@ ON CONFLICT(external_id) DO UPDATE SET
 	return id, err
 }
 
+// BumpCommenterTokenVersion 递增令牌版本并返回新值。
+// 用 MAX(1, ...) 兜底：老库升级后该列若为 NULL，COALESCE 会从 1 起算而不是变成 0。
+func (d *DB) BumpCommenterTokenVersion(id int64) (int, error) {
+	if _, err := d.Exec(
+		`UPDATE commenters SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?`, id); err != nil {
+		return 0, err
+	}
+	return d.commenterTokenVersion(id)
+}
+
+// commenterTokenVersion 读取令牌版本，NULL 按 1 处理（列本身为 NOT NULL，
+// 这里保留 COALESCE 以兼容历史数据约束差异）。
+func (d *DB) commenterTokenVersion(id int64) (int, error) {
+	var v int
+	err := d.QueryRow(`SELECT COALESCE(token_version, 1) FROM commenters WHERE id = ?`, id).Scan(&v)
+	return v, err
+}
+
+// RevokeCommenterTokens 吊销该身份已签发的全部令牌（退出登录 / 改密时调用）。
+func (d *DB) RevokeCommenterTokens(id int64) error {
+	_, err := d.BumpCommenterTokenVersion(id)
+	return err
+}
+
 // GetCommenter 按 id 取身份；不存在返回 nil（令牌有效但身份被清时前端按未登录处理）。
 func (d *DB) GetCommenter(id int64) (*Commenter, error) {
 	var cm Commenter
 	err := d.QueryRow(`
-SELECT id, provider, external_id, nickname, avatar_url, created_at, last_seen_at
+SELECT id, provider, external_id, nickname, avatar_url, created_at, last_seen_at,
+       COALESCE(token_version, 1)
 FROM commenters WHERE id = ?`, id).
-		Scan(&cm.ID, &cm.Provider, &cm.ExternalID, &cm.Nickname, &cm.AvatarURL, &cm.CreatedAt, &cm.LastSeenAt)
+		Scan(&cm.ID, &cm.Provider, &cm.ExternalID, &cm.Nickname, &cm.AvatarURL,
+			&cm.CreatedAt, &cm.LastSeenAt, &cm.TokenVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

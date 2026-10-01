@@ -39,14 +39,9 @@ func MakeToken(username, secret string) (string, error) {
 }
 
 func ParseToken(tokenStr, secret string) (string, error) {
-	t, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(secret), nil
-	})
-	if err != nil || !t.Valid {
-		return "", errors.New("token 无效或已过期")
+	t, err := parseJWT(tokenStr, secret)
+	if err != nil {
+		return "", err
 	}
 	sub, err := t.Claims.GetSubject()
 	if err != nil || sub == "" {
@@ -55,28 +50,65 @@ func ParseToken(tokenStr, secret string) (string, error) {
 	return sub, nil
 }
 
+// parseJWT 校验签名与时效并返回原始令牌（供需要读取额外 claim 的调用方使用）。
+// 显式限制 HMAC 签名族，防算法混淆。
+func parseJWT(tokenStr, secret string) (*jwt.Token, error) {
+	t, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(secret), nil
+	})
+	if err != nil || !t.Valid {
+		return nil, errors.New("token 无效或已过期")
+	}
+	return t, nil
+}
+
+// CommenterClaims 解析后的评论者令牌内容。
+type CommenterClaims struct {
+	ID      int64
+	Version int // 与 commenters.token_version 比对；小于库中值即已被吊销
+}
+
 // MakeCommenterToken 签发评论者令牌：sub = "commenter:<id>"，长效。
-func MakeCommenterToken(id int64, secret string) (string, error) {
+// version 取自 commenters.token_version（登录时为 1，退出/吊销后递增）。
+func MakeCommenterToken(id int64, version int, secret string) (string, error) {
+	if version < 1 {
+		version = 1
+	}
 	claims := jwt.MapClaims{
 		"sub": fmt.Sprintf("%s%d", commenterSubPrefix, id),
 		"exp": time.Now().Add(CommenterTokenTTL).Unix(),
 		"iat": time.Now().Unix(),
+		"ver": version, // 令牌版本：服务端递增 token_version 即可吊销全部旧令牌
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
 }
 
-// ParseCommenterToken 校验评论者令牌并返回内部 commenter id；
+// ParseCommenterToken 校验评论者令牌并返回令牌内容；
 // 非该前缀的令牌（含管理员令牌）一律拒绝。
-func ParseCommenterToken(tokenStr, secret string) (int64, error) {
-	sub, err := ParseToken(tokenStr, secret)
+// 缺少 ver 的历史令牌按版本 1 处理，保证升级前的会话不失效。
+func ParseCommenterToken(tokenStr, secret string) (*CommenterClaims, error) {
+	t, err := parseJWT(tokenStr, secret)
 	if err != nil {
-		return 0, err
+		return nil, err
+	}
+	sub, err := t.Claims.GetSubject()
+	if err != nil || sub == "" {
+		return nil, errors.New("token 无效")
 	}
 	var id int64
 	if _, err := fmt.Sscanf(sub, commenterSubPrefix+"%d", &id); err != nil || id <= 0 {
-		return 0, errors.New("非评论者令牌")
+		return nil, errors.New("非评论者令牌")
 	}
-	return id, nil
+	ver := 1
+	if mc, ok := t.Claims.(jwt.MapClaims); ok {
+		if v, ok := mc["ver"].(float64); ok && v >= 1 {
+			ver = int(v)
+		}
+	}
+	return &CommenterClaims{ID: id, Version: ver}, nil
 }
 
 // IsCommenterSub 判断管理端鉴权拿到的 sub 是否为评论者令牌（用于显式拒绝）。

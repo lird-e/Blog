@@ -38,6 +38,17 @@ var (
 	ghHTTP             = &http.Client{Timeout: 10 * time.Second}
 )
 
+// ghUserAgentValue GitHub REST API 明确要求请求携带 User-Agent，缺失时可能被拒。
+const ghUserAgentValue = "lird-e-blog-oauth/1.0"
+
+// ghUserAgent 组装 User-Agent，附带站点地址便于 GitHub 侧识别来源。
+func (h *Handlers) ghUserAgent() string {
+	if h.Cfg == nil || h.Cfg.SiteURL == "" {
+		return ghUserAgentValue
+	}
+	return ghUserAgentValue + " (+" + h.Cfg.SiteURL + ")"
+}
+
 const (
 	commenterCookie = "commenter_sess"
 	stateTTL        = 10 * time.Minute
@@ -54,6 +65,13 @@ func (h *Handlers) GitHubLogin(c *gin.Context) {
 	if h.Cfg.GitHubClientID == "" || h.Cfg.GitHubSecret == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub 登录未配置（缺少 GITHUB_CLIENT_ID / GITHUB_SECRET）",
+		})
+		return
+	}
+	// JWT_SECRET 缺失时不能签发会话，state 的 HMAC 也会退化为空密钥（可伪造）
+	if !h.authConfigured() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "服务端未配置 JWT_SECRET，登录已禁用（参考 deploy/env.example）",
 		})
 		return
 	}
@@ -82,12 +100,19 @@ func (h *Handlers) GitHubCallback(c *gin.Context) {
 		fail(http.StatusServiceUnavailable, "服务端未配置 GitHub 登录")
 		return
 	}
+	if !h.authConfigured() {
+		fail(http.StatusServiceUnavailable, "服务端未配置 JWT_SECRET，登录已禁用")
+		return
+	}
 	if e := c.Query("error"); e != "" { // 用户在 GitHub 侧点了取消等
 		redirect := "/"
 		if r, err := h.verifyState(c.Query("state")); err == nil {
 			redirect = r
 		}
-		c.Redirect(http.StatusFound, redirect+"?login=cancelled")
+		// 必须用 appendQuery 追加：redirect 可能自带查询串（如 /post/x?a=1），
+		// 直接拼 "?" 会产生 "/post/x?a=1?login=cancelled" 这种畸形 URL，
+		// 且 login 标记本身也会失效（被当成 a 的值的一部分）。
+		c.Redirect(http.StatusFound, appendQuery(redirect, "login", "cancelled"))
 		return
 	}
 	redirect, err := h.verifyState(c.Query("state"))
@@ -114,17 +139,31 @@ func (h *Handlers) GitHubCallback(c *gin.Context) {
 		fail(http.StatusInternalServerError, "保存身份失败")
 		return
 	}
-	token, err := auth.MakeCommenterToken(id, h.Cfg.JWTSecret)
+	// 取回当前令牌版本（登录路径为 1）并据此签发，保证版本始终与库中一致
+	tokenVersion := 1
+	if cm, cerr := h.DB.GetCommenter(id); cerr == nil && cm != nil {
+		tokenVersion = cm.TokenVersion
+	}
+	token, err := auth.MakeCommenterToken(id, tokenVersion, h.Cfg.JWTSecret)
 	if err != nil {
 		fail(http.StatusInternalServerError, "签发会话失败")
 		return
 	}
 	h.setCommenterCookie(c, token)
-	c.Redirect(http.StatusFound, redirect)
+	// login=ok 供前端提示「登录成功」；与 cancelled 分支对称，都用 appendQuery
+	c.Redirect(http.StatusFound, appendQuery(redirect, "login", "ok"))
 }
 
 // Me GET /api/me —— 前端判断评论者登录态；未登录/已过期统一返回 null，不报错。
+// 加短缓存：该接口在每次文章页加载时都会被调用，60 秒私有缓存可省掉大部分查库。
 func (h *Handlers) Me(c *gin.Context) {
+	// 按 Cookie 区分缓存，避免把 A 的登录态发给 B
+	c.Header("Vary", "Cookie")
+	c.Header("Cache-Control", "private, max-age=60")
+	if !h.authConfigured() {
+		c.JSON(http.StatusOK, gin.H{"commenter": nil})
+		return
+	}
 	cm := h.currentCommenter(c)
 	if cm == nil {
 		c.JSON(http.StatusOK, gin.H{"commenter": nil})
@@ -133,31 +172,57 @@ func (h *Handlers) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"commenter": cm})
 }
 
-// Logout POST /api/auth/logout —— 清除会话 Cookie。
+// Logout POST /api/auth/logout —— 递增令牌版本吊销该身份的全部已签发令牌，再清 Cookie。
+// 对照旧实现：无状态 JWT 只能靠浏览器删 Cookie，令牌被复制后 180 天内一直有效；
+// 现在服务端会真正吊销（等价于「退出所有设备」）。
 func (h *Handlers) Logout(c *gin.Context) {
+	if ck, err := c.Cookie(commenterCookie); err == nil && ck != "" && h.authConfigured() {
+		if cl, perr := auth.ParseCommenterToken(ck, h.Cfg.JWTSecret); perr == nil {
+			_ = h.DB.RevokeCommenterTokens(cl.ID)
+		}
+	}
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: commenterCookie, Value: "", Path: "/",
 		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		// 与 setCommenterCookie 保持一致：https 站点清除 Cookie 时同样需要 Secure，
+		// 否则浏览器可能不认这条清除指令
+		Secure: strings.HasPrefix(h.Cfg.SiteURL, "https://"),
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "已退出登录"})
 }
 
-// currentCommenter 从会话 Cookie 解析当前登录身份；无效/过期/身份不存在返回 nil。
+// currentCommenter 从会话 Cookie 解析当前登录身份；无效/过期/身份不存在/已被吊销返回 nil。
 // 供 /api/me 与 CreateComment 复用。
 func (h *Handlers) currentCommenter(c *gin.Context) *db.Commenter {
 	ck, err := c.Cookie(commenterCookie)
 	if err != nil || ck == "" {
 		return nil
 	}
-	id, err := auth.ParseCommenterToken(ck, h.Cfg.JWTSecret)
+	cl, err := auth.ParseCommenterToken(ck, h.Cfg.JWTSecret)
 	if err != nil {
 		return nil
 	}
-	cm, err := h.DB.GetCommenter(id)
-	if err != nil {
+	cm, err := h.DB.GetCommenter(cl.ID)
+	if err != nil || cm == nil {
+		return nil
+	}
+	// 令牌版本落后 = 该令牌已被 Logout 等操作吊销
+	if cl.Version < cm.TokenVersion {
 		return nil
 	}
 	return cm
+}
+
+// appendQuery 往站内跳转路径追加查询参数。
+// redirect 可能已自带查询串（如 /post/x?a=1），必须判断分隔符，
+// 否则会拼出 "/post/x?a=1?login=cancelled" 这种畸形 URL ——
+// 不仅地址非法，新增的参数还会被并进上一个参数的值里而失效。
+func appendQuery(path, key, value string) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + url.QueryEscape(key) + "=" + url.QueryEscape(value)
 }
 
 // setCommenterCookie 写入会话 Cookie；SiteURL 为 https 时附带 Secure 标志。
@@ -187,6 +252,7 @@ func (h *Handlers) fetchGitHubUser(code string) (*ghUser, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", h.ghUserAgent())
 	resp, err := ghHTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -209,6 +275,7 @@ func (h *Handlers) fetchGitHubUser(code string) (*ghUser, error) {
 	}
 	ureq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	ureq.Header.Set("Accept", "application/json")
+	ureq.Header.Set("User-Agent", h.ghUserAgent())
 	uresp, err := ghHTTP.Do(ureq)
 	if err != nil {
 		return nil, err

@@ -28,7 +28,9 @@ function CommentNode({ comment, onReply }) {
         {src
           ? <img className="comment-avatar" src={src} alt="" loading="lazy" />
           : <span className="comment-avatar comment-avatar-fallback">{comment.nickname.slice(0, 1).toUpperCase()}</span>}
-        <span className="comment-nickname" title={comment.avatar_url ? 'GitHub 登录用户' : undefined}>{comment.nickname}</span>
+        {/* provider 由后端带出（游客为空）：比用 avatar_url 是否存在判断更可靠，
+            因为游客填了邮箱也有 Cravatar 头像 */}
+        <span className="comment-nickname" title={comment.provider ? '登录用户' : undefined}>{comment.nickname}</span>
         <time className="comment-time">{fmtTime(comment.created_at)}</time>
         <button type="button" className="comment-reply-btn" onClick={() => onReply(comment)}>回复</button>
       </div>
@@ -42,6 +44,14 @@ function CommentNode({ comment, onReply }) {
   )
 }
 
+// loginNotice 把回跳 URL 上的 login 参数翻译成用户可读提示。
+// 后端在授权成功/取消时分别回跳 ?login=ok / ?login=cancelled。
+function loginNotice(value) {
+  if (value === 'ok') return { type: 'ok', text: 'GitHub 登录成功' }
+  if (value === 'cancelled') return { type: 'err', text: '已取消 GitHub 授权' }
+  return null
+}
+
 export default function Comments({ slug }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +61,8 @@ export default function Comments({ slug }) {
   const [error, setError] = useState('')
   const [profile, setProfile] = useState(loadProfile)
   const [me, setMe] = useState(null) // { commenter: {...} | null }，GitHub 登录态
+  const [redirecting, setRedirecting] = useState(false) // 正在跳转 GitHub
+  const [notice, setNotice] = useState(null) // 登录结果提示 { type, text }
   const mountedAt = useRef(Date.now())
   const formRef = useRef(null)
 
@@ -70,6 +82,19 @@ export default function Comments({ slug }) {
     try { setMe(await api('/me')) } catch { setMe({ commenter: null }) }
   }
   useEffect(() => { load(); loadMe() }, [slug])
+
+  // 读取 OAuth 回跳带来的 login 参数并提示，随后从地址栏清掉，
+  // 避免刷新后重复提示、也避免污染用户可分享的链接。
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const n = loginNotice(params.get('login'))
+    if (!n) return
+    setNotice(n)
+    params.delete('login')
+    const qs = params.toString()
+    window.history.replaceState({}, '',
+      window.location.pathname + (qs ? '?' + qs : '') + window.location.hash)
+  }, [])
 
   const isLogin = !!me?.commenter
 
@@ -99,10 +124,11 @@ export default function Comments({ slug }) {
     if (formRef.current?.email) formRef.current.email.value = ''
   }
 
-  // 退出 GitHub 登录：服务端清 Cookie，本地态同步
+  // 退出 GitHub 登录：服务端吊销令牌并清 Cookie，本地态同步
   async function logout() {
     try { await api('/auth/logout', { method: 'POST' }) } catch { /* Cookie 本已失效时忽略 */ }
     setMe({ commenter: null })
+    setNotice(null) // 清掉可能残留的「登录成功」提示
   }
 
   const loginURL = `/api/auth/github/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
@@ -165,9 +191,19 @@ export default function Comments({ slug }) {
         : <div className="comment-list">{tree.map((c) => <CommentNode key={c.id} comment={c} onReply={onReply} />)}</div>}
 
       <form ref={formRef} className="comment-form" onSubmit={submit}>
+        {/* OAuth 回跳提示：取消授权时用户此前完全无感知，会以为按钮坏了 */}
+        {notice && (
+          <p className={notice.type === 'ok' ? 'form-ok' : 'form-err'} role="status">
+            {notice.text}
+          </p>
+        )}
         {isLogin ? (
           <div className="comment-identity">
-            <img className="comment-avatar" src={me.commenter.avatar_url} alt="" />
+            {me.commenter.avatar_url
+              ? <img className="comment-avatar" src={me.commenter.avatar_url} alt="" />
+              : <span className="comment-avatar comment-avatar-fallback">
+                  {(me.commenter.nickname || '?').slice(0, 1).toUpperCase()}
+                </span>}
             以 GitHub 账号 <b>{me.commenter.nickname}</b> 身份评论
             <button type="button" className="link-btn" onClick={logout}>退出</button>
           </div>
@@ -176,9 +212,14 @@ export default function Comments({ slug }) {
             {!me && <p className="muted comment-identity-loading">检查登录状态…</p>}
             {me && !me.commenter && (
               <div className="comment-oauth">
-                <a className="gh-login-btn" href={loginURL}>
+                <a
+                  className="gh-login-btn"
+                  href={loginURL}
+                  aria-busy={redirecting}
+                  onClick={() => setRedirecting(true)}
+                >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-                  使用 GitHub 登录
+                  {redirecting ? '正在跳转 GitHub…' : '使用 GitHub 登录'}
                 </a>
                 <span className="muted">登录后免填昵称，头像自动同步</span>
               </div>

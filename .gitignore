@@ -9,3 +9,5 @@ web/*.timestamp-*.mjs
 # 本地工具的个人数据目录，不应进入公开仓库
 .workbuddy/
 .trae/
+# 沙箱内构建 Go 时临时重定向的缓存目录
+.gotmp/

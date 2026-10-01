@@ -39,3 +39,10 @@ func md5Hex(value string) string {
 // emailHashRe 校验前端直传的 email_hash：仅接受 32 位小写 hex（md5Hex 的输出格式），
 // 防止垃圾数据借该字段入库。
 var emailHashRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// authConfigured 判断 JWT_SECRET 是否已配置。
+// 管理端登录与 OAuth 登录都依赖它签发/校验令牌，也依赖它给 OAuth state 做 HMAC；
+// 缺失时必须以 503 拒绝，绝不能用空密钥签名（否则令牌与 state 均可伪造）。
+func (h *Handlers) authConfigured() bool {
+	return h.Cfg != nil && h.Cfg.JWTSecret != ""
+}
