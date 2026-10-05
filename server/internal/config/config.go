@@ -29,6 +29,11 @@ func getenv(key, def string) string {
 	return def
 }
 
+// DefaultIPSalt 是 IP_SALT 缺省时使用的占位盐。
+// 导出它是为了让启动检查能识别「仍在用默认值」这种状态并告警——
+// 默认值是公开可见的源码常量，用它算出的 IP 哈希可被任何人反查。
+const DefaultIPSalt = "blog-ip-salt"
+
 func Load() *Config {
 	return &Config{
 		Addr:          getenv("BLOG_ADDR", "127.0.0.1:8080"),
@@ -36,7 +41,7 @@ func Load() *Config {
 		AdminUser:     getenv("ADMIN_USER", "admin"),
 		AdminPassHash: os.Getenv("ADMIN_PASS_HASH"),
 		JWTSecret:     os.Getenv("JWT_SECRET"),
-		IPSalt:        getenv("IP_SALT", "blog-ip-salt"),
+		IPSalt:        getenv("IP_SALT", DefaultIPSalt),
 		SiteURL:       getenv("SITE_URL", "http://127.0.0.1:8080"),
 		SiteTitle:     getenv("SITE_TITLE", "我的博客"),
 		SiteDesc:      getenv("SITE_DESC", "记录技术、思考与生活。"),

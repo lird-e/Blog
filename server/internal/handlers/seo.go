@@ -49,6 +49,7 @@ func absURL(site, path string) string {
 
 // RSS GET /rss.xml —— 最新 20 篇已发布文章
 func (h *Handlers) RSS(c *gin.Context) {
+	c.Header("Cache-Control", "public, max-age=3600")
 	items, _, err := h.DB.ListPosts(db.ListOpts{Page: 1, PageSize: 20, OnlyPublished: true})
 	if err != nil {
 		c.String(http.StatusInternalServerError, "rss error")
@@ -81,6 +82,7 @@ func rssDate(date string) string {
 
 // Sitemap GET /sitemap.xml
 func (h *Handlers) Sitemap(c *gin.Context) {
+	c.Header("Cache-Control", "public, max-age=3600")
 	const size = 50
 	items, total, err := h.DB.ListPosts(db.ListOpts{Page: 1, PageSize: size, OnlyPublished: true})
 	if err != nil {
@@ -123,5 +125,6 @@ func (h *Handlers) Sitemap(c *gin.Context) {
 // Robots GET /robots.txt
 func (h *Handlers) Robots(c *gin.Context) {
 	site := strings.TrimRight(h.Cfg.SiteURL, "/")
-	c.String(http.StatusOK, "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", site)
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.String(http.StatusOK, "User-agent: *\nAllow: /\nDisallow: /admin\n\nSitemap: %s/sitemap.xml\n", site)
 }

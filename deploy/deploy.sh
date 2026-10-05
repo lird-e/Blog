@@ -30,7 +30,17 @@ rm -rf "$OUT_WEB/dist.old"
 echo "==> restart blog-api"
 # blog 用户通过 sudoers 免密白名单重启服务（见 deploy/README.md 第 5 节）
 sudo /usr/bin/systemctl restart blog-api
-sleep 1
-sudo -n /usr/bin/systemctl is-active blog-api >/dev/null && echo "deploy done: $(date)" || {
-  echo "blog-api 启动失败，查看日志：journalctl -u blog-api -n 50"; exit 1;
-}
+
+# 存活检查：systemd 的 active 只代表进程起来了，/healthz 才会真正 ping 数据库，
+# 能挡住「端口在听但 SQLite 打不开」这类假成功。轮询 10 秒。
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/healthz}"
+ok=""
+for _ in $(seq 1 20); do
+  if curl -fsS -m 2 -o /dev/null "$HEALTH_URL"; then ok=1; break; fi
+  sleep 0.5
+done
+if [ -z "$ok" ]; then
+  echo "blog-api 健康检查失败（$HEALTH_URL），查看日志：journalctl -u blog-api -n 50"
+  exit 1
+fi
+echo "deploy done: $(date) (healthz ok)"

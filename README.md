@@ -2,7 +2,7 @@
 
 Go(Gin) + SQLite + React(Vite) 的个人博客，带自建评论区与管理后台，部署于 Ubuntu 云服务器（IP 直连）。
 
-> 架构与部署细节见 `博客重构与云服务器部署方案.md` 与 `deploy/README.md`（服务器部署手册）。
+> 架构设计见 `docs/类CSDN平台搭建方案.md`，服务器部署步骤见 `deploy/README.md`（部署手册）。
 
 ## 目录结构
 
@@ -41,12 +41,13 @@ npm run build        # 产物 dist/，构建前自动同步博客图片到 publi
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/posts?page=&tag=&q=` | 文章列表（分页/标签/搜索） |
-| GET | `/api/posts/:slug` | 文章详情（浏览量自增） |
+| GET | `/api/posts/:slug` | 文章详情（浏览量自增，仅返回渲染后的 HTML） |
 | GET/POST | `/api/posts/:slug/comments` | 评论列表/发表评论（蜜罐+频率限制+时间阈值） |
 | GET | `/api/tags` | 标签云 |
 | GET | `/rss.xml` `/sitemap.xml` | 动态 SEO 输出 |
+| GET | `/healthz` | 健康检查（含数据库 ping），供 deploy.sh 与监控使用 |
 | POST | `/api/admin/login` | 登录（JWT，5 次失败锁 15 分钟） |
-| CRUD | `/api/admin/posts` `/api/admin/comments` | 文章管理 / 评论审核（JWT） |
+| CRUD | `/api/admin/posts` `/api/admin/comments` | 文章管理 / 评论审核（JWT，删除评论会连带删除其整栋回复） |
 
 ## 发布上线
 

@@ -10,12 +10,22 @@
     var t = localStorage.getItem('theme');
     if(!t){ t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
     document.documentElement.setAttribute('data-theme', t);
+    // 浏览器工具栏配色跟随实际主题（用户可能手动覆盖了系统偏好）
+    var m = document.querySelector('meta[name="theme-color"]');
+    if(m) m.setAttribute('content', t === 'dark' ? '#0d1117' : '#ffffff');
   }catch(e){}
 })();
 </script>
 <title>我的博客</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="description" content="记录技术、思考与生活。">
+<meta name="theme-color" content="#ffffff">
+<!-- 分享卡片的静态兜底：不渲染 JS 的抓取器至少知道这是哪个站点。
+     og:url / og:image 需要绝对地址，由 src/seo.js 在页面加载时补全。 -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="我的博客">
+<meta property="og:title" content="我的博客">
+<meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
 <div id="root"></div>

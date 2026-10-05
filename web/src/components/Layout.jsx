@@ -42,6 +42,8 @@ export default function Layout() {
   function toggleTheme() {
     const next = theme === 'dark' ? 'light' : 'dark'
     document.documentElement.setAttribute('data-theme', next)
+    const tc = document.querySelector('meta[name="theme-color"]')
+    if (tc) tc.setAttribute('content', next === 'dark' ? '#0d1117' : '#ffffff')
     try { localStorage.setItem('theme', next) } catch { /* 隐私模式忽略 */ }
     setTheme(next)
   }

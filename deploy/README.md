@@ -1,13 +1,13 @@
 # 云服务器部署手册（Ubuntu · IP 直连）
 
-> 对应《博客重构与云服务器部署方案》第八、九章。按顺序执行，一次部署约 30 分钟。
+> 按顺序执行，一次部署约 30 分钟。架构设计见 `../docs/类CSDN平台搭建方案.md`。
 
 ## 0. 前置
 
 - Ubuntu 20.04+ 云服务器（Ubuntu 22.04 为例），有 root 或 sudo 权限
 - 本地已有 GitHub 仓库 `lird-e/Blog`（main 分支）
 
-## 1. 服务器初始化（方案 阶段 0）
+## 1. 服务器初始化
 
 ```bash
 # 1.1 专用用户（Go 服务不用 root 跑）
@@ -109,7 +109,7 @@ sudo chmod 600 /var/blog/.env
 ```bash
 # 5.0 前置：deploy.sh 以 blog 用户执行，systemctl 重启需要免密白名单
 cat > /etc/sudoers.d/blog-deploy <<'EOF'
-blog ALL=(root) NOPASSWD: /usr/bin/systemctl restart blog-api, /usr/bin/systemctl is-active blog-api
+blog ALL=(root) NOPASSWD: /usr/bin/systemctl restart blog-api
 EOF
 chmod 440 /etc/sudoers.d/blog-deploy && visudo -c
 
@@ -121,6 +121,7 @@ sudo -u blog env HOME=/home/blog npm config set registry https://registry.npmmir
 sudo cp /var/blog/src/deploy/deploy.sh /var/blog/deploy.sh
 sudo chown blog:blog /var/blog/deploy.sh && sudo chmod +x /var/blog/deploy.sh
 sudo -u blog /var/blog/deploy.sh
+# deploy.sh 结尾会轮询 http://127.0.0.1:8080/healthz（含数据库 ping），失败即退出非 0
 # 浏览器访问 http://服务器公网IP 验证；后台在 /admin
 ```
 
@@ -155,6 +156,7 @@ ssh 你的服务器 "sudo -u blog /var/blog/deploy.sh"
 | 操作 | 命令 |
 |---|---|
 | 服务状态 | `systemctl status blog-api` |
+| 健康检查 | `curl -fsS http://127.0.0.1:8080/healthz`（含数据库 ping） |
 | 查看日志 | `journalctl -u blog-api -n 100 -f` |
 | 重启 | `systemctl restart blog-api` |
 | 改 Nginx 后生效 | `nginx -t && systemctl reload nginx` |
@@ -174,7 +176,7 @@ ssh 你的服务器 "sudo -u blog /var/blog/deploy.sh"
 > 先验证：`curl -m 5 -sS -o /dev/null -w "%{http_code}" https://api.github.com`，
 > 超时或不通则暂缓启用（评论区游客功能不受影响）。
 
-## 10. 安全备忘（方案 第九章）
+## 10. 安全备忘
 
 - 裸 IP 无法签发 Let's Encrypt 证书，当前为 HTTP；管理操作尽量在家用网络下进行
 - GitHub 登录会话 Cookie 在 HTTP 下无 Secure 标志（SiteURL 为 https 时自动启用）

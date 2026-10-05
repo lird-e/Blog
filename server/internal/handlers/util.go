@@ -15,7 +15,7 @@ const (
 
 func timeNowMilli() int64 { return time.Now().UnixMilli() }
 
-// hashWithSalt 加盐 SHA-256：评论存 IP 哈希而非明文（隐私设计，方案 4.3/5）。
+// hashWithSalt 加盐 SHA-256：评论存 IP 哈希而非明文（隐私设计）。
 // IP 无对外用途，加盐防彩虹表反查。
 func hashWithSalt(salt, value string) string {
 	if value == "" {

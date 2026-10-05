@@ -24,23 +24,33 @@ type Handlers struct {
 
 // ListPosts GET /api/posts?page=&tag=&q=
 func (h *Handlers) ListPosts(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	tag := strings.TrimSpace(c.Query("tag"))
-	opts := db.ListOpts{Tag: tag, Query: c.Query("q"), Page: page, PageSize: pageSize, OnlyPublished: true}
+	// 列表响应可短缓存：文章发布/改标签后最多 20 秒生效，
+	// 换来首页与标签页翻页时不再每次全量查库。管理端走 /api/admin/posts 不受影响。
+	c.Header("Cache-Control", "public, max-age=20")
+	page, pageSize := pageParams(c, 10)
+	opts := db.ListOpts{
+		Tag: strings.TrimSpace(c.Query("tag")), Query: c.Query("q"),
+		Page: page, PageSize: pageSize, OnlyPublished: true,
+	}
 	items, total, err := h.DB.ListPosts(opts)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文章失败"})
 		return
 	}
-	tp := (total + opts.PageSize - 1) / opts.PageSize
+	c.JSON(http.StatusOK, listResult(items, total, opts.Page, opts.PageSize))
+}
+
+// listResult 组装分页响应。pageSize 必须已由 pageParams 归一为 ≥1，
+// 否则这里整数除零会 panic。
+func listResult(items []db.Post, total, page, pageSize int) gin.H {
+	tp := (total + pageSize - 1) / pageSize
 	if tp < 1 {
 		tp = 1
 	}
-	c.JSON(http.StatusOK, gin.H{
+	return gin.H{
 		"items": items, "total": total,
-		"page": opts.Page, "page_size": opts.PageSize, "total_pages": tp,
-	})
+		"page": page, "page_size": pageSize, "total_pages": tp,
+	}
 }
 
 // GetPost GET /api/posts/:slug —— 详情 + 浏览量自增（同 IP 每日计 1 次）
@@ -64,11 +74,18 @@ func (h *Handlers) GetPost(c *gin.Context) {
 		h.DB.IncrViews(p.Slug)
 		p.Views++
 	}
+	// 公开响应只给渲染好的 HTML：Markdown 原文对读者无用，
+	// 带上它会让文章页体积接近翻倍（管理端 /api/admin/posts/:id 才需要原文）。
+	p.ContentMD = ""
+	// private：响应里的 views 是本次请求按访客 IP 判定的，不能让共享缓存跨访客复用；
+	// 只给浏览器 5 秒新鲜度，用于返回/前进时免重复拉正文与免重复写浏览量。
+	c.Header("Cache-Control", "private, max-age=5, stale-while-revalidate=300")
 	c.JSON(http.StatusOK, p)
 }
 
 // ListTags GET /api/tags —— 标签云
 func (h *Handlers) ListTags(c *gin.Context) {
+	c.Header("Cache-Control", "public, max-age=60")
 	tags, err := h.DB.TagCounts()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取标签失败"})
@@ -81,6 +98,8 @@ func (h *Handlers) ListTags(c *gin.Context) {
 
 // ListComments GET /api/posts/:slug/comments —— 仅已通过，时间正序，前端组楼中楼
 func (h *Handlers) ListComments(c *gin.Context) {
+	// 不缓存：用户发完评论会立刻重新拉列表，任何缓存都会让自己的新评论「消失」
+	c.Header("Cache-Control", "no-store")
 	p, err := h.DB.GetBySlug(c.Param("slug"))
 	if err != nil || p == nil || !p.Published {
 		c.JSON(http.StatusNotFound, gin.H{"error": "文章不存在"})
@@ -95,7 +114,7 @@ func (h *Handlers) ListComments(c *gin.Context) {
 }
 
 // CreateComment POST /api/posts/:slug/comments
-// 防垃圾四件套（方案 4.3）：蜜罐字段、提交时间 <3s 拒绝、频率限制、IP 加盐哈希。
+// 防垃圾四件套：蜜罐字段、提交时间 <3s 拒绝、频率限制、IP 加盐哈希。
 // 身份两种来源（互斥，登录态优先）：
 //   - GitHub 登录（commenter_sess Cookie）：自动采用 GitHub 昵称与头像，忽略表单昵称/邮箱；
 //   - 游客 + 本机身份记忆：昵称必填，email_hash 直传（MD5(email) 记忆回带）或按邮箱现算。
@@ -208,14 +227,16 @@ func (h *Handlers) CreateComment(c *gin.Context) {
 
 // ---- 工具 ----
 
-func pageParams(c *gin.Context) (page, pageSize int) {
+// pageParams 归一分页参数。非法或越界的 page_size 回落到 defaultSize，
+// 保证返回值恒 ≥1——调用方会用它做除法，归零会 panic。
+func pageParams(c *gin.Context, defaultSize int) (page, pageSize int) {
 	page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	pageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", strconv.Itoa(defaultSize)))
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 50 {
-		pageSize = 20
+		pageSize = defaultSize
 	}
-	return
+	return page, pageSize
 }

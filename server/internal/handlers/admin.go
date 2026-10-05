@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,7 +28,7 @@ func slugify(s string) string {
 
 // ---- 登录 ----
 
-// Login POST /api/admin/login —— 失败 5 次锁 15 分钟（方案九）
+// Login POST /api/admin/login —— 失败 5 次锁 15 分钟
 func (h *Handlers) Login(c *gin.Context) {
 	if h.Cfg.AdminPassHash == "" || !h.authConfigured() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -44,7 +45,7 @@ func (h *Handlers) Login(c *gin.Context) {
 		return
 	}
 	key := "login:" + c.ClientIP()
-	if h.LoginLim.Blocked(key, 5, 15*60*timeSecond) {
+	if h.LoginLim.Blocked(key, 5, 15*time.Minute) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "失败次数过多，请 15 分钟后再试"})
 		return
 	}
@@ -61,8 +62,6 @@ func (h *Handlers) Login(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"token": token, "expires_in": int(auth.TokenTTL.Seconds())})
 }
-
-const timeSecond = 1e9 // time.Duration(1s)
 
 // AuthRequired JWT 中间件：校验 Bearer 令牌并把用户名挂到上下文。
 func (h *Handlers) AuthRequired() gin.HandlerFunc {
@@ -93,22 +92,20 @@ func (h *Handlers) AuthRequired() gin.HandlerFunc {
 
 // AdminListPosts GET /api/admin/posts —— 含未发布
 func (h *Handlers) AdminListPosts(c *gin.Context) {
-	page, pageSize := pageParams(c)
+	c.Header("Cache-Control", "no-store") // 含未发布文章，不能被浏览器缓存
+	page, pageSize := pageParams(c, 20)
 	opts := db.ListOpts{Query: c.Query("q"), Page: page, PageSize: pageSize}
 	items, total, err := h.DB.ListPosts(opts)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文章失败"})
 		return
 	}
-	tp := (total + pageSize - 1) / pageSize
-	if tp < 1 {
-		tp = 1
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize, "total_pages": tp})
+	c.JSON(http.StatusOK, listResult(items, total, opts.Page, opts.PageSize))
 }
 
 // AdminGetPost GET /api/admin/posts/:id
 func (h *Handlers) AdminGetPost(c *gin.Context) {
+	c.Header("Cache-Control", "no-store") // 含未发布正文与 Markdown 原文
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	p, err := h.DB.GetByID(id)
 	if err != nil {
@@ -131,6 +128,11 @@ type postPayload struct {
 	Published *bool  `json:"published"`
 }
 
+// maxContentRunes 正文长度上限（约 20 万字符）。
+// 管理端虽有 JWT 保护，但超大正文会直接进库并在全站列表/搜索里反复扫描，
+// 需要一个明确的服务端上限，不能只靠前端与 Nginx 的 client_max_body_size。
+const maxContentRunes = 200_000
+
 // fillPost 校验并补全文章字段：slug 生成、goldmark 渲染、摘要兜底。
 func fillPost(p *db.Post, req postPayload) error {
 	req.Title = strings.TrimSpace(req.Title)
@@ -139,6 +141,9 @@ func fillPost(p *db.Post, req postPayload) error {
 	}
 	if len([]rune(req.ContentMD)) == 0 {
 		return errors.New("正文不能为空")
+	}
+	if len([]rune(req.ContentMD)) > maxContentRunes {
+		return errors.New("正文过长（上限 20 万字符）")
 	}
 	p.Title = req.Title
 	if s := strings.TrimSpace(req.Slug); s != "" {
@@ -265,7 +270,9 @@ func (h *Handlers) AdminDeletePost(c *gin.Context) {
 
 // AdminListComments GET /api/admin/comments?status=
 func (h *Handlers) AdminListComments(c *gin.Context) {
-	page, pageSize := pageParams(c)
+	// 审核队列必须实时：缓存会让刚通过的评论仍显示为待审
+	c.Header("Cache-Control", "no-store")
+	page, pageSize := pageParams(c, 20)
 	list, total, err := h.DB.AdminListComments(c.Query("status"), pageSize, (page-1)*pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取评论失败"})
@@ -297,13 +304,16 @@ func (h *Handlers) AdminSetComment(c *gin.Context) {
 }
 
 // AdminDeleteComment DELETE /api/admin/comments/:id
+// 连同其下全部回复一起删除（整栋楼）：只删父评论会让回复变成孤儿，
+// 前端会把它们渲染成没有上下文的根评论。
 func (h *Handlers) AdminDeleteComment(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err := h.DB.DeleteComment(id); err != nil {
+	n, err := h.DB.DeleteCommentTree(id)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+	c.JSON(http.StatusOK, gin.H{"message": "已删除", "deleted": n})
 }
 
 // ---- 评论模式（先发后显 / 先审后显）----

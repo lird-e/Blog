@@ -155,11 +155,11 @@ func (h *Handlers) GitHubCallback(c *gin.Context) {
 }
 
 // Me GET /api/me —— 前端判断评论者登录态；未登录/已过期统一返回 null，不报错。
-// 加短缓存：该接口在每次文章页加载时都会被调用，60 秒私有缓存可省掉大部分查库。
+// 必须 no-store：响应完全由 Cookie 决定，而浏览器并不按 Vary: Cookie 拆分缓存。
+// 一旦缓存（哪怕只有几十秒），用户从 GitHub 授权回跳到同一篇文章页时，
+// 前端会命中登录前的 null，看起来像「登录没生效」。退出登录同理。
 func (h *Handlers) Me(c *gin.Context) {
-	// 按 Cookie 区分缓存，避免把 A 的登录态发给 B
-	c.Header("Vary", "Cookie")
-	c.Header("Cache-Control", "private, max-age=60")
+	c.Header("Cache-Control", "no-store")
 	if !h.authConfigured() {
 		c.JSON(http.StatusOK, gin.H{"commenter": nil})
 		return

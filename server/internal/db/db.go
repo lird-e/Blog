@@ -1,6 +1,7 @@
 // Package db 封装 SQLite 连接、建表与博客全部数据访问。
-// 数据库设计见《博客重构与云服务器部署方案》第五章；
-// 额外增加 settings 表，用于持久化评论模式（先发后显 / 先审后显）。
+// 表结构：posts（文章，正文双份 md+html）、comments（评论，parent_id 自引用成楼中楼）、
+// settings（键值配置，如评论模式）、commenters（OAuth 评论者身份）、redirects（slug 改名跳转）。
+// 数据库设计文档见 deploy/README.md 与 docs/。
 package db
 
 import (
@@ -131,6 +132,8 @@ CREATE TABLE IF NOT EXISTS redirects (
   new_slug TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_comments_status ON comments(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 `
 	if _, err := d.Exec(schema); err != nil {
@@ -461,6 +464,8 @@ func (d *DB) TagCounts() ([]map[string]any, error) {
 
 // ---- 评论 ----
 
+// CreateComment 新建评论。parent_id / commenter_id 为 0 时写入 NULL（游客），
+// 因此读取侧必须用 sql.NullInt64 扫描这两列。
 func (d *DB) CreateComment(c *Comment) (int64, error) {
 	res, err := d.Exec(`
 INSERT INTO comments (post_id, parent_id, nickname, email_hash, content, ip_hash, status, created_at, commenter_id, avatar_url)
@@ -514,14 +519,16 @@ WHERE `+where+` ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`,
 	list := []Comment{}
 	for rows.Next() {
 		var c Comment
-		var parent, emailHash, avatarURL sql.NullString
+		var parent, commenter sql.NullInt64
+		var emailHash, avatarURL sql.NullString
 		if err := rows.Scan(&c.ID, &c.PostID, &parent, &c.Nickname, &emailHash, &c.Content,
-			&c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL, &c.Provider, &c.PostSlug, &c.PostTitle); err != nil {
+			&c.Status, &c.CreatedAt, &commenter, &avatarURL, &c.Provider, &c.PostSlug, &c.PostTitle); err != nil {
 			return nil, 0, err
 		}
+		c.ParentID = parent.Int64
+		c.CommenterID = commenter.Int64
 		c.EmailHash = emailHash.String
 		c.AvatarURL = avatarURL.String
-		fmt.Sscan(parent.String, &c.ParentID)
 		list = append(list, c)
 	}
 	return list, total, rows.Err()
@@ -535,15 +542,16 @@ func scanComments(rows *sql.Rows, err error) ([]Comment, error) {
 	list := []Comment{}
 	for rows.Next() {
 		var c Comment
-		var parent, emailHash sql.NullString
-		var avatarURL sql.NullString
+		var parent, commenter sql.NullInt64
+		var emailHash, avatarURL sql.NullString
 		if err := rows.Scan(&c.ID, &c.PostID, &parent, &c.Nickname, &emailHash,
-			&c.Content, &c.Status, &c.CreatedAt, &c.CommenterID, &avatarURL, &c.Provider); err != nil {
+			&c.Content, &c.Status, &c.CreatedAt, &commenter, &avatarURL, &c.Provider); err != nil {
 			return nil, err
 		}
+		c.ParentID = parent.Int64
+		c.CommenterID = commenter.Int64
 		c.EmailHash = emailHash.String
 		c.AvatarURL = avatarURL.String
-		fmt.Sscan(parent.String, &c.ParentID)
 		list = append(list, c)
 	}
 	return list, rows.Err()
@@ -568,9 +576,22 @@ func (d *DB) GetCommentForPost(commentID, postID int64) (*Comment, error) {
 	return &c, nil
 }
 
-func (d *DB) DeleteComment(id int64) error {
-	_, err := d.Exec(`DELETE FROM comments WHERE id = ?`, id)
-	return err
+// DeleteCommentTree 删除评论及其全部后代回复，返回删除条数。
+// 只删单条会留下 parent_id 指向已删行的孤儿回复——前端会把它们渲染成根评论，
+// 「回复 @某人」的上下文随之错乱，所以按子树整棵删除。
+func (d *DB) DeleteCommentTree(id int64) (int, error) {
+	res, err := d.Exec(`
+WITH RECURSIVE subtree(id) AS (
+  SELECT id FROM comments WHERE id = ?
+  UNION ALL
+  SELECT c.id FROM comments c JOIN subtree s ON c.parent_id = s.id
+)
+DELETE FROM comments WHERE id IN (SELECT id FROM subtree)`, id)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // ---- 评论者（OAuth 登录身份）----

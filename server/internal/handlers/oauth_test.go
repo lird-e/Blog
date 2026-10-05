@@ -47,6 +47,8 @@ func newTestServer(t *testing.T) *gin.Engine {
 	r := gin.New()
 	api := r.Group("/api")
 	{
+		api.GET("/posts", h.ListPosts)
+		api.GET("/posts/:slug", h.GetPost)
 		api.GET("/posts/:slug/comments", h.ListComments)
 		api.POST("/posts/:slug/comments", h.CreateComment)
 		api.GET("/auth/github/login", h.GitHubLogin)
@@ -55,7 +57,11 @@ func newTestServer(t *testing.T) *gin.Engine {
 		api.GET("/me", h.Me)
 	}
 	guarded := r.Group("/api/admin", h.AuthRequired())
-	guarded.GET("/posts", h.AdminListPosts)
+	{
+		guarded.GET("/posts", h.AdminListPosts)
+		guarded.DELETE("/comments/:id", h.AdminDeleteComment)
+	}
+	r.GET("/robots.txt", h.Robots)
 	return r
 }
 

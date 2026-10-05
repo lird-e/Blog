@@ -23,7 +23,7 @@ export default function Post() {
           return
         }
         setPost(p)
-        setMeta(`${p.title} · 我的博客`, p.excerpt)
+        setMeta(`${p.title} · 我的博客`, p.excerpt, { type: 'article' })
       })
       .catch((e) => setError(e.status === 404 ? '文章不存在或已被移动。' : e.message))
     window.scrollTo(0, 0)
@@ -74,6 +74,12 @@ export default function Post() {
         } catch { btn.textContent = '复制失败' }
       })
       wrap.appendChild(btn)
+    })
+    // 文章图片是服务端 Markdown 直出的，拿不到尺寸元数据，至少让首屏之外的图懒加载，
+    // 避免长文一进来就拉全部截图
+    root.querySelectorAll('img').forEach((img) => {
+      if (!img.hasAttribute('loading')) img.loading = 'lazy'
+      img.decoding = 'async'
     })
   }, [post])
 

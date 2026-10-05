@@ -5,7 +5,7 @@ import "testing"
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Hello, World!": "hello-world",
-		"Go 入门指南":      "go-入门指南",
+		"Go 入门指南":       "go-入门指南",
 		"AI Agent 深入":   "ai-agent-深入",
 		"  --  ":        "post",
 		"":              "post",
