@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -35,7 +36,19 @@ var (
 	githubAuthorizeURL = "https://github.com/login/oauth/authorize"
 	githubTokenURL     = "https://github.com/login/oauth/access_token"
 	githubUserURL      = "https://api.github.com/user"
-	ghHTTP             = &http.Client{Timeout: 10 * time.Second}
+	// ghHTTP 拉取用户信息走 api.github.com，国内直连稳定，10s 足够。
+	ghHTTP = &http.Client{Timeout: 10 * time.Second}
+	// ghTokenHTTP 换 token 走 github.com 主站，国内出口到它的链路会分钟级抽风
+	// （TCP 连得上、TLS 握得手，响应却永远不来）。单次超时收紧到 8s 快速判死，
+	// 交给 exchangeCode 重试，比死等一个长超时更容易赶上链路恢复。
+	ghTokenHTTP = &http.Client{Timeout: 8 * time.Second}
+)
+
+// 授权码换 token 的重试预算。最坏耗时 ≈ 8*3 + 0.4+0.8 = 25.2s，
+// 留在 nginx proxy_read_timeout（60s）之内，也不会让浏览器等太久。
+const (
+	ghTokenAttempts = 3
+	ghTokenBackoff  = 400 * time.Millisecond
 )
 
 // ghUserAgentValue GitHub REST API 明确要求请求携带 User-Agent，缺失时可能被拒。
@@ -126,7 +139,13 @@ func (h *Handlers) GitHubCallback(c *gin.Context) {
 		return
 	}
 	user, err := h.fetchGitHubUser(code)
-	if err != nil || user.ID <= 0 {
+	if err == nil && user.ID <= 0 {
+		err = fmt.Errorf("响应缺少用户 id")
+	}
+	if err != nil {
+		// 不留日志的话，线上只看到一个 502，分不清是链路、凭据还是回调地址的问题。
+		// 不记录 code：它虽是一次性的，但仍属于授权凭据。
+		log.Printf("GitHub 登录失败: %v", err)
 		fail(http.StatusBadGateway, "获取 GitHub 用户信息失败，请稍后重试")
 		return
 	}
@@ -242,54 +261,107 @@ func (h *Handlers) setCommenterCookie(c *gin.Context, token string) {
 
 // fetchGitHubUser 授权码换 access_token 再拉取用户信息。
 func (h *Handlers) fetchGitHubUser(code string) (*ghUser, error) {
+	token, err := h.exchangeCode(code)
+	if err != nil {
+		return nil, err
+	}
+	return h.fetchUser(token)
+}
+
+// exchangeCode 用授权码换 access_token，对「请求没能送达 GitHub」的失败重试。
+//
+// 只重试这一类失败是有意为之：授权码是一次性的，请求若已到达 GitHub 就会被消费掉，
+// 此时重发只会换来 bad_verification_code，反而把真正的原因盖住。
+// 反过来，连接/读取超时说明请求大概率半路夭折，原样重发是安全的。
+func (h *Handlers) exchangeCode(code string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= ghTokenAttempts; attempt++ {
+		if attempt > 1 {
+			delay := time.Duration(attempt-1) * ghTokenBackoff
+			log.Printf("GitHub token 交换第 %d/%d 次重试（%v 后）：%v", attempt, ghTokenAttempts, delay, lastErr)
+			time.Sleep(delay)
+		}
+		token, retryable, err := h.postToken(code)
+		if err == nil {
+			return token, nil
+		}
+		if !retryable {
+			return "", err
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("token 交换 %d 次均无响应，最后一次: %w", ghTokenAttempts, lastErr)
+}
+
+// postToken 单次授权码换 token；retryable 表示请求可能根本没到 GitHub，可以原样重发。
+func (h *Handlers) postToken(code string) (token string, retryable bool, err error) {
 	form := url.Values{}
 	form.Set("client_id", h.Cfg.GitHubClientID)
 	form.Set("client_secret", h.Cfg.GitHubSecret)
 	form.Set("code", code)
 	req, err := http.NewRequest(http.MethodPost, githubTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return "", false, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", h.ghUserAgent())
-	resp, err := ghHTTP.Do(req)
+	resp, err := ghTokenHTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return "", true, fmt.Errorf("token 交换无响应: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token 交换失败 status=%d", resp.StatusCode)
+	if err != nil {
+		return "", true, fmt.Errorf("token 响应读取中断: %w", err)
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
+		Error       string `json:"error"`
+		ErrorDesc   string `json:"error_description"`
 	}
-	if err := json.Unmarshal(body, &tok); err != nil || tok.AccessToken == "" {
-		return nil, fmt.Errorf("token 响应无效")
+	if err := json.Unmarshal(body, &tok); err != nil {
+		// 非 JSON 通常是中间设备插进来的 HTML 页（登录门户/拦截页），带片段才好认
+		return "", false, fmt.Errorf("token 响应不是 JSON status=%d body=%q", resp.StatusCode, snip(string(body)))
 	}
+	if tok.AccessToken == "" {
+		return "", false, fmt.Errorf("token 交换被拒 status=%d error=%s %s",
+			resp.StatusCode, tok.Error, tok.ErrorDesc)
+	}
+	return tok.AccessToken, false, nil
+}
 
+// fetchUser 用 access_token 拉取 GitHub 用户信息。
+func (h *Handlers) fetchUser(token string) (*ghUser, error) {
 	ureq, err := http.NewRequest(http.MethodGet, githubUserURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	ureq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	ureq.Header.Set("Authorization", "Bearer "+token)
 	ureq.Header.Set("Accept", "application/json")
 	ureq.Header.Set("User-Agent", h.ghUserAgent())
 	uresp, err := ghHTTP.Do(ureq)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("用户信息请求失败: %w", err)
 	}
 	defer uresp.Body.Close()
 	ubody, err := io.ReadAll(io.LimitReader(uresp.Body, 1<<20))
 	if err != nil || uresp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("用户信息拉取失败 status=%d", uresp.StatusCode)
+		return nil, fmt.Errorf("用户信息拉取失败 status=%d body=%q", uresp.StatusCode, snip(string(ubody)))
 	}
 	var user ghUser
 	if err := json.Unmarshal(ubody, &user); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("用户信息解析失败: %w", err)
 	}
 	return &user, nil
+}
+
+// snip 截断日志用的响应片段，避免整页 HTML 灌进 journal。
+func snip(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	return s[:200] + "…"
 }
 
 // ---- state 签名 ----

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -260,6 +261,74 @@ func TestLogoutRevokesToken(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"commenter":null`) {
 		t.Errorf("退出后旧令牌应失效（commenter 为 null），实际: %s", w.Body.String())
 	}
+}
+
+// 回归：github.com 的出口链路会分钟级抽风，token 交换必须重试。
+// 这里让前两次直接掐断连接（等价于超时：请求没送达 GitHub），第三次成功，
+// 登录应当照常完成。
+func TestTokenExchangeRetriesTransientFailure(t *testing.T) {
+	var hits int32
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		if n <= 2 {
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatalf("httptest 不支持 Hijacker")
+			}
+			conn, _, _ := hj.Hijack()
+			_ = conn.Close() // 不给响应，触发传输层错误
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"gho_recovered"}`)
+	}))
+	userSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":9001,"login":"recovered","avatar_url":"http://e/r.png"}`)
+	}))
+	withGitHubURLs(t, tokenSrv.URL, userSrv.URL)
+
+	r := newTestServer(t)
+	cookie := startLogin(t, r)
+	if got := atomic.LoadInt32(&hits); got != 3 {
+		t.Errorf("token 交换应重试到第 3 次成功，实际请求 %d 次", got)
+	}
+	if w := doReq(r, http.MethodGet, "/api/me", "", map[string]string{"Cookie": cookie}); !strings.Contains(w.Body.String(), "recovered") {
+		t.Errorf("重试后应登录成功，实际: %s", w.Body.String())
+	}
+}
+
+// 回归：GitHub 已经回过话（授权码无效）时不得重试 —— 授权码是一次性的，
+// 重发只会换来同样的拒绝，还白等两轮退避。
+func TestTokenExchangeNoRetryOnRejection(t *testing.T) {
+	var hits int32
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"error":"bad_verification_code","error_description":"Code verified but not valid"}`)
+	}))
+	userSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	withGitHubURLs(t, tokenSrv.URL, userSrv.URL)
+
+	r := newTestServer(t)
+	w := doReq(r, http.MethodGet, "/api/auth/github/login?redirect=/post/abc", "", nil)
+	state := mustState(t, w.Header().Get("Location"))
+	w2 := doReq(r, http.MethodGet, "/api/auth/github/callback?code=used-up&state="+url.QueryEscape(state), "", nil)
+	if w2.Code != http.StatusBadGateway {
+		t.Fatalf("授权码被拒应 502，got %d: %s", w2.Code, w2.Body.String())
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("GitHub 已答复时不应重试，实际请求 %d 次", got)
+	}
+}
+
+// withGitHubURLs 把 GitHub 的 token/user 端点指向 mock 服务。
+func withGitHubURLs(t *testing.T, tokenURL, userURL string) {
+	t.Helper()
+	oldTok, oldUser := githubTokenURL, githubUserURL
+	githubTokenURL, githubUserURL = tokenURL, userURL
+	t.Cleanup(func() {
+		githubTokenURL, githubUserURL = oldTok, oldUser
+	})
 }
 
 func mustState(t *testing.T, location string) string {
