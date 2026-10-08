@@ -85,7 +85,7 @@ function Panel() {
     <div className="admin-page">
       <header className="admin-topbar">
         <div className="container admin-topbar-inner">
-          <b>我的博客 · 管理后台</b>
+          <b>关于我的博客网这档事 · 管理后台</b>
           <nav className="admin-tabs">
             <NavLink to="/admin/posts">文章</NavLink>
             <NavLink to="/admin/comments">评论审核</NavLink>

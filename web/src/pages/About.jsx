@@ -10,7 +10,7 @@ export default function About() {
   useEffect(() => {
     api('/posts/about').then((p) => {
       setPost(p)
-      setMeta(`${p.title} · 我的博客`, p.excerpt, { type: 'article' })
+      setMeta(`${p.title} · 关于我的博客网这档事`, p.excerpt, { type: 'article' })
     }).catch((e) => setError(e.message))
   }, [])
 

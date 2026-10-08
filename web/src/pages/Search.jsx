@@ -11,7 +11,7 @@ export default function Search() {
   const [loading, setLoading] = useState(false)
   const timer = useRef(null)
 
-  useEffect(() => { setMeta('搜索 · 我的博客') }, [])
+  useEffect(() => { setMeta('搜索 · 关于我的博客网这档事') }, [])
 
   useEffect(() => {
     clearTimeout(timer.current)

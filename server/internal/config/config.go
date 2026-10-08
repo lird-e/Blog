@@ -43,8 +43,8 @@ func Load() *Config {
 		JWTSecret:     os.Getenv("JWT_SECRET"),
 		IPSalt:        getenv("IP_SALT", DefaultIPSalt),
 		SiteURL:       getenv("SITE_URL", "http://127.0.0.1:8080"),
-		SiteTitle:     getenv("SITE_TITLE", "我的博客"),
-		SiteDesc:      getenv("SITE_DESC", "记录技术、思考与生活。"),
+		SiteTitle:     getenv("SITE_TITLE", "关于我的博客网这档事"),
+		SiteDesc:      getenv("SITE_DESC", "产品 × 技术交叉处的实践与复盘——售后知识库、自建博客工具链与 AI 应用笔记。"),
 		WebDir:        os.Getenv("BLOG_WEB_DIR"),
 		Debug:         os.Getenv("BLOG_DEBUG") == "1",
 

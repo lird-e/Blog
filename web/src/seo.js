@@ -1,7 +1,7 @@
 // 逐页 SEO：SPA 只有一个 index.html，title / description / canonical / Open Graph
 // 都得手动同步，否则分享到社交与 IM 时永远显示首页那张卡片。
-const SITE_NAME = '我的博客'
-const DEFAULT_DESC = '记录技术、思考与生活。'
+const SITE_NAME = '关于我的博客网这档事'
+const DEFAULT_DESC = '产品 × 技术交叉处的实践与复盘——售后知识库、自建博客工具链与 AI 应用笔记。'
 const DEFAULT_IMAGE = '/assets/og-cover.png'
 
 function upsertMeta(attr, key, value) {

@@ -53,7 +53,7 @@ export default function Layout() {
       <div className="read-progress" style={{ width: progress + '%' }} />
       <header className={`site-header${scrolled ? ' scrolled' : ''}`}>
         <div className="container">
-          <Link to="/" className="logo"><span className="logo-dot" />我的博客</Link>
+          <Link to="/" className="logo"><span className="logo-dot" />关于我的博客网这档事</Link>
           <nav>
             <NavLink to="/">首页</NavLink>
             <NavLink to="/tags">标签</NavLink>
@@ -71,7 +71,7 @@ export default function Layout() {
       </main>
       <footer className="site-footer">
         <div className="container">
-          © {new Date().getFullYear()} 我的博客 ·
+          © {new Date().getFullYear()} 关于我的博客网这档事 ·
           <a href="/rss.xml">RSS</a> ·
           <NavLink to="/admin">管理</NavLink>
         </div>

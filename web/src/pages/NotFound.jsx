@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { setMeta } from '../seo.js'
 
 export default function NotFound() {
-  useEffect(() => { setMeta('404 · 页面不存在 · 我的博客') }, [])
+  useEffect(() => { setMeta('404 · 页面不存在 · 关于我的博客网这档事') }, [])
   return (
     <div style={{ textAlign: 'center', padding: '60px 0' }}>
       <h1>404</h1>

@@ -10,7 +10,7 @@ export default function Tags() {
   useEffect(() => {
     api('/tags').then((d) => {
       setTags(d.tags || [])
-      setMeta('标签 · 我的博客')
+      setMeta('标签 · 关于我的博客网这档事')
     }).catch((e) => setError(e.message))
   }, [])
 

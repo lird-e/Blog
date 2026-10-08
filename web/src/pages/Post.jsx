@@ -23,7 +23,7 @@ export default function Post() {
           return
         }
         setPost(p)
-        setMeta(`${p.title} · 我的博客`, p.excerpt, { type: 'article' })
+        setMeta(`${p.title} · 关于我的博客网这档事`, p.excerpt, { type: 'article' })
       })
       .catch((e) => setError(e.status === 404 ? '文章不存在或已被移动。' : e.message))
     window.scrollTo(0, 0)
