@@ -30,7 +30,7 @@ export default function Home({ tag: tagProp } = {}) {
     <>
       {page === 1 && !tag && (
         <section className="hero fade-in">
-          <h1>欢迎来到<span className="gradient-text">关于我的博客网这档事</span></h1>
+          <h1><span className="gradient-text">关于我的博客网这档事</span></h1>
           <p className="subtitle">用一线技术视角做产品：知识库、工具与复盘。</p>
           <div className="hero-line" />
           <div className="hero-social">
