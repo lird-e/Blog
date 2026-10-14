@@ -241,6 +241,12 @@ type ListOpts struct {
 	OnlyPublished bool
 }
 
+// escapeLike 转义 LIKE 通配符，配合下方 SQL 里的 ESCAPE '\' 使用：
+// 用户输入的 % / _ 按字面匹配，而不是变成「匹配任意串/任意单字」的通配符。
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
 func (o *ListOpts) where() (string, []any) {
 	conds, args := []string{"1=1"}, []any{}
 	if o.OnlyPublished {
@@ -253,8 +259,8 @@ func (o *ListOpts) where() (string, []any) {
 	}
 	if q := strings.TrimSpace(o.Query); q != "" {
 		for _, tok := range strings.Fields(q) {
-			like := "%" + tok + "%"
-			conds = append(conds, "(title LIKE ? OR excerpt LIKE ? OR content_md LIKE ? OR content_html LIKE ?)")
+			like := "%" + escapeLike(tok) + "%"
+			conds = append(conds, `(title LIKE ? ESCAPE '\' OR excerpt LIKE ? ESCAPE '\' OR content_md LIKE ? ESCAPE '\' OR content_html LIKE ? ESCAPE '\')`)
 			args = append(args, like, like, like, like)
 		}
 	}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api.js'
-import { setMeta } from '../seo.js'
+import { setMeta, setJsonLd } from '../seo.js'
 import Comments from '../components/Comments.jsx'
 
 // 文章详情：TOC 目录卡片 + 阅读时长 + 代码块装饰（mac 圆点 / 一键复制）
@@ -24,6 +24,18 @@ export default function Post() {
         }
         setPost(p)
         setMeta(`${p.title} · 关于我的博客网这档事`, p.excerpt, { type: 'article' })
+        // BlogPosting 结构化数据：日期为 frontmatter 的 ISO 日期，schema.org 可直接识别
+        setJsonLd({
+          '@context': 'https://schema.org',
+          '@type': 'BlogPosting',
+          headline: p.title,
+          description: p.excerpt,
+          datePublished: p.created_at,
+          dateModified: p.updated_at || p.created_at,
+          image: new URL('/assets/og-cover.png', window.location.origin).href,
+          mainEntityOfPage: window.location.origin + `/post/${p.slug}`,
+          author: { '@type': 'Person', name: '关于我的博客网这档事' },
+        })
       })
       .catch((e) => setError(e.status === 404 ? '文章不存在或已被移动。' : e.message))
     window.scrollTo(0, 0)

@@ -18,7 +18,13 @@ GOPROXY=https://goproxy.cn,direct go build -o "$OUT_SERVER/blog-api" ./cmd/serve
 
 echo "==> build react frontend"
 cd "$SRC/web"
-npm ci
+# 依赖安装：package-lock 比 node_modules 旧时跳过 npm ci（它每次全量删除重装，
+# 是 2C/1.6G 小机上最耗时的一步）。强制重装：FORCE_NPM_CI=1 ./deploy.sh
+if [ "${FORCE_NPM_CI:-0}" = "1" ] || [ ! -d node_modules ] || [ package-lock.json -nt node_modules ]; then
+  npm ci --prefer-offline --no-audit --no-fund
+else
+  echo "==> 依赖未变化，跳过 npm ci"
+fi
 npm run build
 # 原子替换：先拷到临时目录再 mv，避免删除期间出现 404 窗口
 rm -rf "$OUT_WEB/dist.new" "$OUT_WEB/dist.old"

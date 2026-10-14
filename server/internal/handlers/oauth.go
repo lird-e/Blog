@@ -357,11 +357,13 @@ func (h *Handlers) fetchUser(token string) (*ghUser, error) {
 }
 
 // snip 截断日志用的响应片段，避免整页 HTML 灌进 journal。
+// 按 rune 截断：字节截断会把多字节中文切成无效 UTF-8，journal 里全是乱码。
 func snip(s string) string {
-	if len(s) <= 200 {
+	r := []rune(s)
+	if len(r) <= 200 {
 		return s
 	}
-	return s[:200] + "…"
+	return string(r[:200]) + "…"
 }
 
 // ---- state 签名 ----

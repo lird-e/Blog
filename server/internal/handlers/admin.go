@@ -255,14 +255,21 @@ func (h *Handlers) AdminSetPostPublished(c *gin.Context) {
 // AdminDeletePost DELETE /api/admin/posts/:id —— 评论随外键级联删除
 func (h *Handlers) AdminDeletePost(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	old, _ := h.DB.GetByID(id)
+	// 显式判错：读取失败仍继续删会跳过下方 redirects 清理，留下悬空跳转记录
+	old, err := h.DB.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文章失败"})
+		return
+	}
+	if old == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文章不存在"})
+		return
+	}
 	if err := h.DB.DeletePost(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败"})
 		return
 	}
-	if old != nil {
-		_ = h.DB.DeleteRedirectsTo(old.Slug)
-	}
+	_ = h.DB.DeleteRedirectsTo(old.Slug)
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
 }
 

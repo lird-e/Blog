@@ -10,7 +10,11 @@ export default function PostCard({ post }) {
         {post.comment_count > 0 && <span>💬 {post.comment_count}</span>}
         {post.views > 0 && <span>👁 {post.views}</span>}
       </div>
-      <h2>{post.title}</h2>
+      <h2>
+        {/* 标题本身是真实链接：屏幕阅读器与「中键新标签打开」从这里进入；
+            下方的整卡覆盖层只负责扩大点击热区，aria-hidden 避免链接被重复播报 */}
+        <Link to={`/post/${post.slug}`}>{post.title}</Link>
+      </h2>
       <p className="card-excerpt">{post.excerpt}</p>
       <div className="card-tags">
         {post.tags_list.map((t) => (

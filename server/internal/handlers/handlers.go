@@ -149,6 +149,14 @@ func (h *Handlers) CreateComment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "评论内容需为 1~2000 个字符"})
 		return
 	}
+	// 3.5) 文章存在性提前校验（一次索引读）：打错 slug 或文章已下线的请求
+	// 直接 404，不消耗下方评论配额。放在限流前不会放大滥用——刷 404 走的
+	// 是 Nginx limit_req 的额度，不触碰评论频率窗口。
+	p, err := h.DB.GetBySlug(c.Param("slug"))
+	if err != nil || p == nil || !p.Published {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文章不存在"})
+		return
+	}
 	// GitHub 登录态优先：cookie 有效即采用其昵称与头像快照
 	commenter := h.currentCommenter(c)
 	var nickname string
@@ -173,11 +181,6 @@ func (h *Handlers) CreateComment(c *gin.Context) {
 	}
 	if !h.Lim.Allow("cd:"+ip, 20, timeDay) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "今日评论数已达上限"})
-		return
-	}
-	p, err := h.DB.GetBySlug(c.Param("slug"))
-	if err != nil || p == nil || !p.Published {
-		c.JSON(http.StatusNotFound, gin.H{"error": "文章不存在"})
 		return
 	}
 	if req.ParentID > 0 {

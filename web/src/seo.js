@@ -26,6 +26,10 @@ export function setMeta(title, description, { type = 'website', image } = {}) {
   const desc = description || DEFAULT_DESC
   const ogImage = new URL(image || DEFAULT_IMAGE, window.location.origin).href
 
+  // 清掉上一个页面可能留下的文章 JSON-LD（Post 页会在 setMeta 之后重新写入），
+  // 避免首页/标签页等非文章页残留 BlogPosting 结构化数据误导搜索引擎
+  document.getElementById('wb-ld-json')?.remove()
+
   if (title) document.title = title
   upsertMeta('name', 'description', desc)
   upsertMeta('property', 'og:title', title || SITE_NAME)
@@ -46,4 +50,18 @@ export function setMeta(title, description, { type = 'website', image } = {}) {
     document.head.appendChild(link)
   }
   link.setAttribute('href', canonical)
+}
+
+// setJsonLd 文章页结构化数据（schema.org BlogPosting）：帮助搜索引擎
+// 理解标题/日期/作者并生成富摘要。挂到固定 id 的 script 节点上，
+// 每次调用覆盖内容；页面切换时由 setMeta 负责清理。
+export function setJsonLd(data) {
+  let el = document.getElementById('wb-ld-json')
+  if (!el) {
+    el = document.createElement('script')
+    el.type = 'application/ld+json'
+    el.id = 'wb-ld-json'
+    document.head.appendChild(el)
+  }
+  el.textContent = JSON.stringify(data)
 }

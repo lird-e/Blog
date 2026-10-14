@@ -56,9 +56,13 @@ func (h *Handlers) RSS(c *gin.Context) {
 		return
 	}
 	var b []byte
-	b = append(b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n<rss version=\"2.0\">\n<channel>\n"...)
+	// xmlns:atom + <atom:link rel="self">：RSS 校验器要求 channel 声明自身的规范地址
+	b = append(b, `<?xml version="1.0" encoding="UTF-8"?>`+
+		"\n<rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\">\n<channel>\n"...)
 	b = append(b, fmt.Sprintf("<title>%s</title>\n<link>%s</link>\n<description>%s</description>\n<language>zh-CN</language>\n",
 		escXML(h.Cfg.SiteTitle), escXML(h.Cfg.SiteURL), escXML(h.Cfg.SiteDesc))...)
+	b = append(b, fmt.Sprintf("<atom:link rel=\"self\" type=\"application/rss+xml\" href=\"%s\"/>\n",
+		escXML(absURL(h.Cfg.SiteURL, "/rss.xml")))...)
 	for _, p := range items {
 		link := absURL(h.Cfg.SiteURL, "/post/"+p.Slug)
 		pubDate := rssDate(p.CreatedAt)
@@ -108,6 +112,14 @@ func (h *Handlers) Sitemap(c *gin.Context) {
 		})
 	}
 	entries = append(entries, urlEntry{loc: absURL(h.Cfg.SiteURL, "/tags")})
+	// 标签列表页与文章页同权收录；标签来自已发布文章统计，天然只含有效标签
+	if tags, terr := h.DB.TagCounts(); terr == nil {
+		for _, t := range tags {
+			if name, _ := t["name"].(string); name != "" {
+				entries = append(entries, urlEntry{loc: absURL(h.Cfg.SiteURL, "/tag/"+name)})
+			}
+		}
+	}
 	entries = append(entries, urlEntry{loc: absURL(h.Cfg.SiteURL, "/about")})
 
 	b := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n")
