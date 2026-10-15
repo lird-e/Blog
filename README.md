@@ -1,6 +1,6 @@
 # 我的博客（前后端分离版）
 
-Go(Gin) + SQLite + React(Vite) 的个人博客，带自建评论区与管理后台，部署于 Ubuntu 云服务器（IP 直连）。
+Go(Gin) + SQLite + React(Vite) 的个人博客，带自建评论区（支持 GitHub OAuth 登录）与管理后台，部署于 Ubuntu 云服务器（IP 直连）。
 
 > 架构设计见 `docs/类CSDN平台搭建方案.md`，服务器部署步骤见 `deploy/README.md`（部署手册）。
 
@@ -34,7 +34,7 @@ npm run dev          # http://localhost:5173
 npm run build        # 产物 dist/，构建前自动同步博客图片到 public/assets
 ```
 
-管理后台 `http://localhost:5173/admin`：配置 `ADMIN_USER / ADMIN_PASS_HASH / JWT_SECRET` 环境变量后启用，密码哈希用 `go run ./server/cmd/genpass 你的密码` 生成。
+管理后台 `http://localhost:5173/admin`：配置 `ADMIN_USER / ADMIN_PASS_HASH / JWT_SECRET` 环境变量后启用，密码哈希用 `cd server && go run ./cmd/genpass 你的密码` 生成（生产环境变量参考 `deploy/env.example`）。
 
 ## 主要接口
 
@@ -44,11 +44,13 @@ npm run build        # 产物 dist/，构建前自动同步博客图片到 publi
 | GET | `/api/posts/:slug` | 文章详情（浏览量自增，仅返回渲染后的 HTML） |
 | GET/POST | `/api/posts/:slug/comments` | 评论列表/发表评论（蜜罐+频率限制+时间阈值） |
 | GET | `/api/tags` | 标签云 |
-| GET | `/rss.xml` `/sitemap.xml` | 动态 SEO 输出 |
+| GET/POST | `/api/auth/github/*` `/api/auth/logout` `/api/me` | GitHub OAuth 评论者登录/登出（未配置凭据时返回 503） |
+| GET | `/rss.xml` `/sitemap.xml` `/robots.txt` | 动态 SEO 输出 |
 | GET | `/healthz` | 健康检查（含数据库 ping），供 deploy.sh 与监控使用 |
 | POST | `/api/admin/login` | 登录（JWT，5 次失败锁 15 分钟） |
 | CRUD | `/api/admin/posts` `/api/admin/comments` | 文章管理 / 评论审核（JWT，删除评论会连带删除其整栋回复） |
+| GET/PUT | `/api/admin/settings` | 站点设置（评论模式：先发后显 / 先审后显） |
 
 ## 发布上线
 
-见 `deploy/README.md`：本地 `git push`（GitHub + Gitee 双推）→ 服务器执行 `/var/blog/deploy.sh`（拉镜像 → 构建 → 重启 systemd）。
+见 `deploy/README.md`：本地 `git push`（GitHub 单远端 `lird-e/Blog`）→ 服务器执行 `/var/blog/deploy.sh`（git pull → go build → npm build → 重启 systemd）。
